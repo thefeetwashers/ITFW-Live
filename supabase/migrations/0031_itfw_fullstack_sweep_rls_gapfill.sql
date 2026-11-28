@@ -3,6 +3,30 @@
 -- (founder's final expert sweep, Nov 28, 2026).
 -- Run AFTER 0030. Do NOT run live until the founder / browser task says so.
 --
+-- FIX (Nov 28, 2026 — go-live blocker, ERROR 42P01): section 3
+-- assumed biometrics_appointments / address_changes /
+-- document_translations were created by 0030. They are NOT: they are
+-- created by 0035 (0035_itfw_more_added.sql lines 32/55/83; 0035 was
+-- renumbered from 0030), which runs AFTER 0031. The SQL Editor
+-- therefore failed 0031 at the first DROP POLICY on
+-- biometrics_appointments and rolled the whole script back (0031
+-- applied nothing). The claim in the note below that "run order
+-- between the renamed files and this one does not change its result"
+-- was WRONG for section 3 and is corrected here.
+-- Fix, two parts (intent unchanged, no policy weakened):
+--   (a) Section 3 policies for those three tables are now created
+--       ONLY when the table exists (DO block + to_regclass guard).
+--       diy_drafts is NOT guarded: it exists since 0023, already live.
+--   (b) 0035 creates those three tables AND their UPDATE policies —
+--       with USING only. Because 0035 runs after 0031, a guard alone
+--       would leave the weak policies in the final state, so 0035's
+--       three UPDATE policies were hardened to the SAME WITH CHECK
+--       form 0031 intended. That is the genuine dependency that
+--       required editing 0035; nothing else in 0035 changed.
+-- After this fix 0031 runs cleanly on the live DB (0021–0030 live),
+-- and running 0032–0037 in order afterwards leaves every UPDATE
+-- policy with its WITH CHECK.
+--
 -- NOTE ON NUMBERING (resolved by the coordinator, Nov 28, 2026): the
 -- directory briefly held TWO files named 0030 and TWO named 0033.
 -- Resolved by rename, no content changed: 0030_itfw_more_added.sql is
@@ -15,7 +39,8 @@
 -- correct and is NOT changed here:
 --   * diy_drafts (0023), diy_unlocks (0024), daily_checkins (0026),
 --     fee_waiver_checks (0029), biometrics_appointments /
---     address_changes / document_translations (0030),
+--     address_changes / document_translations (0035 — renumbered from
+--     0030, NOT 0030 as this comment originally said),
 --     google_connections / document_resends (0030 pro-discovery):
 --     every table has RLS enabled and participant-only policies.
 --   * Every new foreign key points at a real row: diy_drafts.account_id
@@ -56,7 +81,7 @@
 --    row to a different case/account on update (Postgres checks the
 --    new row against WITH CHECK only when one exists):
 --      * biometrics_appointments / address_changes /
---        document_translations (0030): update had USING only.
+--        document_translations (0035): update had USING only.
 --      * diy_drafts (0023): update had USING only.
 --    Fixed: each gains WITH CHECK (participant on the NEW case AND
 --    client_id/account_id still their own). USING is unchanged.
@@ -108,30 +133,60 @@ create policy document_resends_insert on public.document_resends for insert
 
 -- ---------------------------------------------------------------------------
 -- 3. UPDATE WITH CHECK — a row cannot be moved to another case/account.
+--    GUARDED (fix, Nov 28, 2026): biometrics_appointments,
+--    address_changes and document_translations are created by 0035,
+--    which runs AFTER 0031, so each policy below is created ONLY when
+--    its table already exists (to_regclass). 0035 creates the same
+--    hardened policy itself (see 0035), so the final state is the
+--    same whether the table exists at 0031 time or not. The policy
+--    text is written out in full (not built from parts) so text
+--    audits keep matching it. diy_drafts is NOT guarded — it exists
+--    since 0023, already live.
 -- ---------------------------------------------------------------------------
-drop policy if exists biometrics_appointments_update on public.biometrics_appointments;
-create policy biometrics_appointments_update on public.biometrics_appointments for update
-  using (public.is_case_participant(case_id))
-  with check (
-    public.is_case_participant(case_id)
-    and client_id = public.current_account_id()
-  );
+do $$
+begin
+  if to_regclass('public.biometrics_appointments') is not null then
+    execute 'drop policy if exists biometrics_appointments_update on public.biometrics_appointments';
+    execute $pol$
+      create policy biometrics_appointments_update on public.biometrics_appointments for update
+        using (public.is_case_participant(case_id))
+        with check (
+          public.is_case_participant(case_id)
+          and client_id = public.current_account_id()
+        )
+    $pol$;
+  end if;
+end $$;
 
-drop policy if exists address_changes_update on public.address_changes;
-create policy address_changes_update on public.address_changes for update
-  using (public.is_case_participant(case_id))
-  with check (
-    public.is_case_participant(case_id)
-    and client_id = public.current_account_id()
-  );
+do $$
+begin
+  if to_regclass('public.address_changes') is not null then
+    execute 'drop policy if exists address_changes_update on public.address_changes';
+    execute $pol$
+      create policy address_changes_update on public.address_changes for update
+        using (public.is_case_participant(case_id))
+        with check (
+          public.is_case_participant(case_id)
+          and client_id = public.current_account_id()
+        )
+    $pol$;
+  end if;
+end $$;
 
-drop policy if exists document_translations_update on public.document_translations;
-create policy document_translations_update on public.document_translations for update
-  using (public.is_case_participant(case_id))
-  with check (
-    public.is_case_participant(case_id)
-    and client_id = public.current_account_id()
-  );
+do $$
+begin
+  if to_regclass('public.document_translations') is not null then
+    execute 'drop policy if exists document_translations_update on public.document_translations';
+    execute $pol$
+      create policy document_translations_update on public.document_translations for update
+        using (public.is_case_participant(case_id))
+        with check (
+          public.is_case_participant(case_id)
+          and client_id = public.current_account_id()
+        )
+    $pol$;
+  end if;
+end $$;
 
 drop policy if exists diy_drafts_update on public.diy_drafts;
 create policy diy_drafts_update on public.diy_drafts for update

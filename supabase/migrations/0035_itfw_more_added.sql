@@ -109,8 +109,16 @@ create policy biometrics_appointments_select on public.biometrics_appointments f
 create policy biometrics_appointments_insert on public.biometrics_appointments for insert
   with check (public.is_case_participant(case_id)
     and client_id = public.current_account_id());
+-- UPDATE policies carry the WITH CHECK from 0031 section 3 (hardened
+-- Nov 28, 2026): 0035 runs AFTER 0031 and re-creates these policies,
+-- so a USING-only policy here would undo 0031's fix in the final
+-- state. Same USING, same WITH CHECK as 0031 intended.
 create policy biometrics_appointments_update on public.biometrics_appointments for update
-  using (public.is_case_participant(case_id));
+  using (public.is_case_participant(case_id))
+  with check (
+    public.is_case_participant(case_id)
+    and client_id = public.current_account_id()
+  );
 
 create policy address_changes_select on public.address_changes for select
   using (public.is_case_participant(case_id));
@@ -118,7 +126,11 @@ create policy address_changes_insert on public.address_changes for insert
   with check (public.is_case_participant(case_id)
     and client_id = public.current_account_id());
 create policy address_changes_update on public.address_changes for update
-  using (public.is_case_participant(case_id));
+  using (public.is_case_participant(case_id))
+  with check (
+    public.is_case_participant(case_id)
+    and client_id = public.current_account_id()
+  );
 
 create policy document_translations_select on public.document_translations for select
   using (public.is_case_participant(case_id));
@@ -126,7 +138,11 @@ create policy document_translations_insert on public.document_translations for i
   with check (public.is_case_participant(case_id)
     and client_id = public.current_account_id());
 create policy document_translations_update on public.document_translations for update
-  using (public.is_case_participant(case_id));
+  using (public.is_case_participant(case_id))
+  with check (
+    public.is_case_participant(case_id)
+    and client_id = public.current_account_id()
+  );
 
 -- Founder/admin read on the new case-scoped tables (0006 pattern).
 do $$
