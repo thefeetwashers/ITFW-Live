@@ -18,6 +18,22 @@
 // sender, role, channel, original language + original text + English
 // translation, timestamp, and delivery status
 // (queued / sent / failed / not_configured).
+//
+// INSTANT ANSWERS (src/lib/instantChat.ts + POST /api/ask-niptei
+// { instantChat: true }): when a CLIENT asks a question-like message
+// in Portal Chat, the system immediately posts a sourced answer from
+// the rule-based engine (locked data only) IN THIS SAME THREAD — the
+// client does not wait for a person. Every system answer carries the
+// label "Answered by the system, not a person — educational
+// information only, not legal advice" and its source. Unknown
+// questions get exactly "I do not know — check uscis.gov / ask your
+// preparer / ask an attorney" and are flagged to the professional in
+// this thread; legal-decision questions get NO legal answer, escalate
+// to Find Attorney / Find DOJ + Review $99 / Human Review $199, and
+// are flagged too. The BYO AI copilot stays optional and 501 until a
+// key is set — never a fake AI answer. Greetings ("hello", "thanks")
+// are normal chat messages and do NOT trigger an instant answer
+// (see isQuestionLike in src/lib/instantChat.ts).
 "use client";
 
 import { useState } from "react";
@@ -26,6 +42,10 @@ import { LANGUAGES } from "@/lib/i18n";
 import { TRANSLATION_WARNING, TRANSLATION_NOT_CONFIGURED_NOTE, isRtl } from "@/lib/translate";
 import { MESSAGE_TEMPLATES, fillTemplate, type TemplateId } from "@/lib/messageTemplates";
 import type { IsolationRole } from "@/lib/isolation";
+import {
+  isQuestionLike,
+  type InstantChatResult,
+} from "@/lib/instantChat";
 
 export type ThreadChannel = "portal_chat" | "sms" | "whatsapp" | "email";
 export type DeliveryStatus = "queued" | "sent" | "failed" | "not_configured";
@@ -41,6 +61,19 @@ export interface UnifiedMessage {
   translatedText: string | null;
   deliveryStatus: DeliveryStatus;
   time: string;
+  /** Instant system answer (src/lib/instantChat.ts) — not a person,
+   *  not sent anywhere. Rendered with the system label + sources. */
+  isSystemAnswer?: boolean;
+  systemLabel?: string;
+  sources?: { label: string; url: string }[];
+  escalated?: boolean;
+  flaggedForProfessional?: boolean;
+}
+
+export interface InstantFlag {
+  question: string;
+  reason: string;
+  at: string;
 }
 
 const CHANNEL_LABELS: Record<ThreadChannel, string> = {
@@ -93,8 +126,15 @@ export default function UnifiedThread(props: {
   const [templateLang, setTemplateLang] = useState<LanguageCode>("en");
   const [notice, setNotice] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  /** Questions the system could not answer or had to escalate —
+   *  flagged here for the professional in the same thread. Local
+   *  state only in this build (no Supabase); persist to audit_log
+   *  when live. */
+  const [instantFlags, setInstantFlags] = useState<InstantFlag[]>([]);
 
   const isStudent = viewerRole === "law_student";
+  const isProfessionalSide =
+    viewerRole !== "client" && viewerRole !== "family";
 
   function applyTemplate(id: TemplateId) {
     const t = MESSAGE_TEMPLATES.find((x) => x.id === id);
@@ -146,6 +186,64 @@ export default function UnifiedThread(props: {
     setNotice(detail);
     setDraft("");
     setSending(false);
+    // Instant answer: a client question in Portal Chat gets an
+    // immediate system answer in this same thread — no waiting for
+    // a person. Greetings are not questions (isQuestionLike) and
+    // stay as normal chat messages.
+    if (channel === "portal_chat" && viewerRole === "client" && isQuestionLike(text)) {
+      void fetchInstantAnswer(text);
+    }
+  }
+
+  async function fetchInstantAnswer(question: string) {
+    try {
+      const res = await fetch("/api/ask-niptei", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, language: clientLanguage, instantChat: true, caseId }),
+      });
+      const data = (await res.json()) as { instant?: InstantChatResult };
+      // 501 "AI not configured" is the expected status — the body
+      // still carries the non-AI instant answer. No answer in the
+      // body = no system message (the professional still sees the
+      // client question in the thread).
+      if (!data.instant) return;
+      const instant = data.instant;
+      setMessages((m) => [
+        ...m,
+        {
+          id: `utm-system-${Date.now()}`,
+          sender: "Ask NIPTEI (system)",
+          senderRole: "system",
+          channel: "portal_chat",
+          originalText: instant.answer,
+          originalLanguage: "en",
+          translatedText: null,
+          deliveryStatus: "sent",
+          time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+          isSystemAnswer: true,
+          systemLabel: instant.systemLabel,
+          sources: instant.sources,
+          escalated: instant.escalated,
+          flaggedForProfessional: instant.flaggedForProfessional,
+        },
+      ]);
+      if (instant.flaggedForProfessional) {
+        setInstantFlags((f) => [
+          ...f,
+          {
+            question,
+            reason: instant.escalated
+              ? "Needs a licensed attorney or DOJ-accredited representative — escalated, no legal answer given."
+              : "System does not know — needs a human answer.",
+            at: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+          },
+        ]);
+      }
+    } catch {
+      // No system message on failure — the client question stays in
+      // the thread for the professional; nothing is faked.
+    }
   }
 
   return (
@@ -155,6 +253,26 @@ export default function UnifiedThread(props: {
         One thread per case. Channels: Portal Chat, SMS, WhatsApp, Email. Case: <span className="font-mono">{caseId}</span> (example).
         Only participants in this case can see this thread — no message, document, invoice, or case is visible to anyone who is not a participant.
       </p>
+      <p className="mt-1 text-xs text-slate-600">
+        Instant answers are ON for Portal Chat: when the client asks a question here, the system answers
+        immediately from the locked guides (with its source) — no waiting for a person. Every system answer
+        is labelled as answered by the system, not a person. Questions the system cannot answer, or that need
+        a legal decision, are flagged to the professional in this thread.
+      </p>
+      {isProfessionalSide && instantFlags.length > 0 && (
+        <div role="status" className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2">
+          <p className="text-sm font-semibold text-red-900">
+            Flagged for you — {instantFlags.length} question{instantFlags.length === 1 ? "" : "s"} need{instantFlags.length === 1 ? "s" : ""} a human follow-up:
+          </p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-red-900">
+            {instantFlags.map((f, i) => (
+              <li key={`flag-${i}`}>
+                “{f.question}” — {f.reason} ({f.at})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {isStudent && (
         <p className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
           Law student view: your supervisor sees every message in this thread. You cannot message a client without supervisor visibility.
@@ -163,7 +281,42 @@ export default function UnifiedThread(props: {
 
       <div className="mt-3 space-y-2">
         {messages.map((m) => (
-          <div key={m.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+          <div key={m.id} className={"rounded-lg border px-3 py-2 text-sm " + (m.isSystemAnswer ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50")}>
+            {m.isSystemAnswer ? (
+              <>
+                <p className="text-xs font-semibold text-blue-900">
+                  {m.sender} · {m.time} · Instant system answer — not sent anywhere
+                </p>
+                {m.escalated && (
+                  <p className="mt-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-900">
+                    Escalated — this needs a licensed attorney or DOJ-accredited representative. No legal
+                    answer was given. Flagged to the professional in this thread.
+                  </p>
+                )}
+                {m.flaggedForProfessional && !m.escalated && (
+                  <p className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900">
+                    The system does not know this one — flagged to the professional in this thread for a
+                    human answer.
+                  </p>
+                )}
+                <p className="mt-1 whitespace-pre-line">{m.originalText}</p>
+                <p className="mt-2 text-xs font-semibold text-blue-900">{m.systemLabel}</p>
+                {m.sources && m.sources.length > 0 && (
+                  <p className="mt-1 text-xs text-slate-600">
+                    Sources:{" "}
+                    {m.sources.map((s, i) => (
+                      <span key={s.url}>
+                        {i > 0 ? " · " : ""}
+                        <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">
+                          {s.label}
+                        </a>
+                      </span>
+                    ))}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
             <p className="text-xs font-semibold">
               {m.sender} · {m.senderRole} · {CHANNEL_LABELS[m.channel]} · {m.time} ·{" "}
               <span className={m.deliveryStatus === "sent" ? "text-green-700" : "text-amber-700"}>
@@ -185,6 +338,8 @@ export default function UnifiedThread(props: {
               </div>
             </div>
             <p className="mt-1 text-xs text-slate-500">{TRANSLATION_WARNING}</p>
+              </>
+            )}
           </div>
         ))}
       </div>

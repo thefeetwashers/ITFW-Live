@@ -50,7 +50,7 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_REGISTRY_FORM_CODES,
   ATTORNEY_OPTION_LINE,
@@ -124,6 +124,20 @@ export interface DynamicFormIntakeEngineProps {
   actorId?: string | null;
   actorRole?: "client" | "preparer" | "attorney" | "nonprofit" | "admin";
   initialLanguage?: LanguageCode;
+  /** Save-and-resume (guided DIY flow): answers restored from the
+   *  caller's saved draft (public.diy_drafts, migration 0023).
+   *  Each value is { original, mapped } — the same shape the engine
+   *  keeps in state. Absent = start empty. */
+  initialAnswers?: Record<string, AnswerValue> | null;
+  /** Save-and-resume: field name of the exact question the client
+   *  left off (diy_drafts.current_field_name). The engine scrolls
+   *  to it once on mount so the client resumes where they stopped. */
+  initialResumeFieldName?: string | null;
+  /** Save-and-resume: called with the full answers map on every
+   *  answer change, so the parent can autosave the draft (debounced)
+   *  to /api/diy/drafts. Values are never logged here — the parent
+   *  owns what it sends, and the drafts route sanitizes again. */
+  onAnswersChange?: ((answers: Record<string, AnswerValue>) => void) | null;
 }
 
 interface AnswerValue {
@@ -185,11 +199,16 @@ export default function DynamicFormIntakeEngine({
   actorId,
   actorRole,
   initialLanguage = "en",
+  initialAnswers = null,
+  initialResumeFieldName = null,
+  onAnswersChange = null,
 }: DynamicFormIntakeEngineProps) {
   const isPreparerMode = mode === "preparer_assisted";
   const [selected, setSelected] = useState<string[]>(initialForms);
   const [lang, setLang] = useState<LanguageCode>(initialLanguage);
-  const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
+  const [answers, setAnswers] = useState<Record<string, AnswerValue>>(
+    () => initialAnswers ?? {}
+  );
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [newLabel, setNewLabel] = useState("");
   const [newKind, setNewKind] = useState<"address" | "employment">("address");
@@ -204,6 +223,28 @@ export default function DynamicFormIntakeEngine({
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [generateBusy, setGenerateBusy] = useState(false);
   const [packet, setPacket] = useState<PacketResult | null>(null);
+
+  // Save-and-resume: report every answer change to the parent (which
+  // debounces the draft save), and scroll once on mount to the exact
+  // question the client left off. The callback is kept in a ref so
+  // the effect below does not re-run when the parent re-renders.
+  const onAnswersChangeRef = useRef(onAnswersChange);
+  onAnswersChangeRef.current = onAnswersChange;
+  useEffect(() => {
+    onAnswersChangeRef.current?.(answers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answers]);
+  const resumeScrolledRef = useRef(false);
+  useEffect(() => {
+    if (resumeScrolledRef.current || !initialResumeFieldName) return;
+    resumeScrolledRef.current = true;
+    const el = document.getElementById(`dyn-${initialResumeFieldName}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus({ preventScroll: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Preparer block — prefilled ONLY from the logged-in preparer's real
   // profile. No profile = blank fields, labelled EXAMPLE / not-loaded.

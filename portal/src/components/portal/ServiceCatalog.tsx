@@ -17,6 +17,7 @@ import {
   CATALOG_COUNT_NOTE,
   CATALOG_STANDALONE_FORM_COUNT,
 } from "@/lib/catalogAudit";
+import RequestQuoteForm from "@/components/portal/RequestQuoteForm";
 
 export default function ServiceCatalog() {
   const ordered = useMemo(
@@ -145,6 +146,9 @@ export default function ServiceCatalog() {
           ))}
         </ul>
       </div>
+
+      {/* Unpriced forms — quoted individually, never priced by invention. */}
+      <RequestQuoteForm />
     </section>
   );
 }

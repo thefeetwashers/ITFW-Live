@@ -18,10 +18,12 @@ import CaseTodoNotes from "@/components/preparer/CaseTodoNotes";
 import RfeTracker from "@/components/preparer/RfeTracker";
 import MissingItemsTracker from "@/components/preparer/MissingItemsTracker";
 import InvoiceActions from "@/components/preparer/InvoiceActions";
+import BusinessToolsPanel from "@/components/preparer/BusinessToolsPanel";
 import AppointmentsRenewals from "@/components/preparer/AppointmentsRenewals";
 import ReferralCard from "@/components/portal/ReferralCard";
 import PreparerProfileCard from "@/components/preparer/PreparerProfileCard";
 import CommunicationHubPreparer from "@/components/preparer/CommunicationHubPreparer";
+import DashboardEmailComposer from "@/components/comms/DashboardEmailComposer";
 import AttorneyHandoff from "@/components/preparer/AttorneyHandoff";
 import StudentSupervisionGuardrail from "@/components/preparer/StudentSupervisionGuardrail";
 import VisaBulletinManager from "@/components/preparer/VisaBulletinManager";
@@ -39,8 +41,20 @@ import FamilyTreeRoster from "@/components/portal/FamilyTreeRoster";
 import UnifiedThread from "@/components/comms/UnifiedThread";
 import PermissionsPanel from "@/components/comms/PermissionsPanel";
 import CaseCommandPanel from "@/components/nextstep/CaseCommandPanel";
+import OneClickActions from "@/components/nextstep/OneClickActions";
+import NotificationInbox from "@/components/nextstep/NotificationInbox";
 import AskNipteiChat from "@/components/copilot/AskNipteiChat";
 import AskNipteiByoSettings from "@/components/copilot/AskNipteiByoSettings";
+import GoogleConnectionsPanel from "@/components/google/GoogleConnectionsPanel";
+import ClientInviteCard from "@/components/pro/ClientInviteCard";
+import RenewalRadarSection from "@/components/dashboard/RenewalRadarSection";
+import FeeWaiverCheckerSection from "@/components/dashboard/FeeWaiverCheckerSection";
+import TotalCostEstimatorSection from "@/components/dashboard/TotalCostEstimatorSection";
+import VaultExpirySection from "@/components/dashboard/VaultExpirySection";
+import {
+  LeadsPipelineSummary,
+  TodayRemindersBanner,
+} from "@/components/dashboard/DashboardEmbeds";
 
 type TabId = "command" | "leads" | "visa" | "profile" | "communicate" | "escalate";
 
@@ -81,20 +95,10 @@ export default function PreparerDashboard() {
 
       {tab === "command" ? (
         <div className="space-y-6">
-          <PermissionsPanel role="preparer" />
-          <UnifiedThread
-            caseId="example-case-1"
-            caseLabel="Example Client A — I-130 (EXAMPLE)"
-            viewerRole="preparer"
-            viewerName="You (Document Preparer)"
-            clientLanguage="es"
-          />
-          <DailyCommand />
-          {/* Next Step + Stage + Payment + Communication engine (one
-              screen). Daily Command + unified thread already render above,
-              so the panel does not repeat them. EXAMPLE case here is the
-              consular I-130 case (CeacTracker below), so route is
-              outside_us — the tracker shows NVC steps only. */}
+          {/* Final sweep (Nov 28, 2026): next step FIRST. The
+              CaseCommandPanel (next step -> colour checklist -> payment)
+              now leads this tab; the thread, Daily Command and
+              permissions follow it instead of burying it. */}
           <CaseCommandPanel
             role="preparer"
             route="outside_us"
@@ -104,14 +108,61 @@ export default function PreparerDashboard() {
             canEditRoute
             guide="professional"
           />
+          {/* One-click actions + notification inbox, beside the panel.
+              No real case id exists in this example build, so the
+              draft-email / status-update actions honestly say they need
+              an open case instead of posting against the example id;
+              chat and checklist links work. Pass a real case id here
+              once the command tab loads a real case. */}
+          <OneClickActions caseLabel="Example Client A — I-130 (EXAMPLE — no real case id yet)" />
+          <NotificationInbox />
+          {/* EXPERT FEATURES, INSIDE THE DASHBOARD (Nov 28, 2026) —
+              on the Command Center tab itself (the default tab), never
+              hidden in a submenu: Renewal & Expiry Radar for every
+              client in the pipeline (soonest first), the I-912 fee
+              waiver check result per client, the Total Cost Estimator
+              per case, vault expiry flags, and the live leads +
+              pipeline summary. No rows are invented: with nothing on
+              file each section shows its honest empty state. */}
+          <TodayRemindersBanner />
+          <LeadsPipelineSummary role="preparer" />
+          <RenewalRadarSection renewals={[]} audience="professional" />
+          <FeeWaiverCheckerSection audience="professional" />
+          <TotalCostEstimatorSection audience="professional" />
+          <VaultExpirySection documents={[]} audience="professional" />
+          <PermissionsPanel role="preparer" />
+          <UnifiedThread
+            caseId="example-case-1"
+            caseLabel="Example Client A — I-130 (EXAMPLE)"
+            viewerRole="preparer"
+            viewerName="You (Document Preparer)"
+            clientLanguage="es"
+          />
+          <DailyCommand />
           <ClientIdentityCard />
           <CaseTodoNotes />
           <RfeTracker />
           <MissingItemsTracker />
           <BillingPipeline />
           <InvoiceActions />
+          {/* Business tools (Nov 28, 2026) — own-Stripe status, calendar,
+              e-sign, per-client vault, unread-per-case, invoice list,
+              client search, monthly summary. No live account is wired
+              in here yet, so every section shows its honest empty /
+              not-connected state until real rows exist. */}
+          <BusinessToolsPanel />
           <AgencyNumberHub />
           <FamilyInviteManager />
+          {/* Invite your own client — reuses the family_invites magic
+              invite + 6-digit code system (POST
+              /api/professionals/invite-client). No account id is
+              known in this example build, so the card shows its
+              signed-in prompt until a real account id is passed. */}
+          <ClientInviteCard invitedBy="" referralCode={null} />
+          {/* Google Calendar / Drive / Gmail — connection UI + code
+              paths only. Google Cloud OAuth is not set up yet, so
+              every product shows "Not connected". */}
+          <GoogleConnectionsPanel accountId="" profileId="" />
           <ComplianceGuardrails />
           <AgencyChecklists />
           {/* Part 2 — NVC & Consular Processing Engine + 6 extra modules */}
@@ -152,6 +203,12 @@ export default function PreparerDashboard() {
       ) : tab === "communicate" ? (
         <div className="space-y-6">
           <CommunicationHubPreparer />
+          {/* In-dashboard email (Nov 28, 2026) — email the client from
+              this dashboard, or send a one-click system draft. No real
+              case is loaded in this example build, so the composer
+              browses templates and explains that sending needs a real
+              open case; pass a real caseId once the tab loads one. */}
+          <DashboardEmailComposer caseId={null} professionalId={null} />
           {/* Ask NIPTEI copilot — professional view: BYO Chat AI
               settings + copilot preview. Non-AI FAQ answers in this
               build (OpenRouter NOT connected). */}

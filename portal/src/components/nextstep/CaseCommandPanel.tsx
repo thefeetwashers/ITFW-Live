@@ -36,6 +36,7 @@ import ColourChecklist from "./ColourChecklist";
 import PaymentCentre from "./PaymentCentre";
 import CommsComposer from "./CommsComposer";
 import PostSubmissionTracker from "./PostSubmissionTracker";
+import CaseTracker from "./CaseTracker";
 import { HowThisWorksClient, HowToServiceClient } from "./HowItWorks";
 
 export type DashboardRole =
@@ -91,7 +92,7 @@ function exampleInterview(route: CaseRoute) {
   }));
   return {
     interviewDate: null,
-    embassyPost: "Port-au-Prince, Haiti (EXAMPLE — from NVC case PHP2026514009)",
+    embassyPost: "Port-au-Prince, Haiti (EXAMPLE — from NVC case PHP2026144009)",
     medicalExamStatus: "NOT SCHEDULED" as const,
     vacDate: EXAMPLE_VAC.dateIso,
     vacLocation: EXAMPLE_VAC.location,
@@ -162,6 +163,20 @@ export default function CaseCommandPanel(props: {
         interview={exampleInterview(route)}
         applicantCount={1}
         canEditRoute={canEditRoute}
+      />
+
+      {/* Case-number tracking + NVC/consular (EIGHTH ADDITION, Nov 28,
+          2026). Reuses the receipt + status above; adds the masked
+          receipt entry, the dated status-change log, the completeness
+          view from our records, the RFE/NOID decoder, and the
+          consular submission checklist. No live USCIS lookup, no
+          officer-file view, no CEAC password field. */}
+      <CaseTracker
+        receiptNumber={EXAMPLE_USCIS.receiptNumber}
+        formCode="I-130"
+        templateId="i130-nvc"
+        caseLabel="Form I-130 — Family Petition (EXAMPLE)"
+        nvcCaseNumber="PHP2026144009"
       />
 
       {showComms && (

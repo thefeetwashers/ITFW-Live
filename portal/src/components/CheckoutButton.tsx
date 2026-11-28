@@ -17,6 +17,7 @@ export default function CheckoutButton({
   email,
   accountId,
   caseId,
+  formCode,
   label,
   disabled,
 }: {
@@ -26,6 +27,10 @@ export default function CheckoutButton({
   email?: string;
   accountId?: string;
   caseId?: string;
+  /** DIY form code, when this checkout is a DIY unlock. Sent so
+   *  /api/checkout can refuse a second charge when the unlock is
+   *  already paid ("Already paid" — 409, nothing charged). */
+  formCode?: string;
   label: string;
   disabled?: boolean;
 }) {
@@ -40,7 +45,7 @@ export default function CheckoutButton({
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId, items, plan, email, accountId, caseId }),
+        body: JSON.stringify({ priceId, items, plan, email, accountId, caseId, formCode }),
       });
       const data = (await res.json()) as { url?: string; error?: string; note?: string };
       if (!res.ok || !data.url) {

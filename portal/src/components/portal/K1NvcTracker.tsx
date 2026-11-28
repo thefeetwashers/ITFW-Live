@@ -111,7 +111,7 @@ export default function K1NvcTracker() {
             type="text"
             value={caseInput}
             onChange={(e) => setCaseInput(e.target.value)}
-            placeholder="e.g. PHP2026514009 (EXAMPLE format)"
+            placeholder="e.g. PHP2026144009 (EXAMPLE format)"
             className="mt-1 block w-full rounded border border-slate-300 bg-white px-2 py-1 font-mono text-sm"
           />
         </label>

@@ -1,5 +1,5 @@
 // Preparer Communication Hub — unified thread + BYO integrations.
-// Local state / queue ONLY. Nothing is ever sent from here: Resend,
+// Local state / queue ONLY. Nothing is ever sent from here: AWS SES,
 // AWS SES, and Twilio are NOT connected, no keys exist, and the sender
 // email is not verified. Every send attempt queues the message and says
 // so. Quick templates are provided in all 7 languages (EN, ES, HT, FR,
@@ -71,7 +71,7 @@ export default function CommunicationHubPreparer() {
     setQueue((q) => [...q, { channel, to: to || "Example Client A", body }]);
     setDraft("");
     setNotice(
-      `${channel}: NOT CONFIGURED — Twilio / Resend are not connected, so nothing was sent. The message is queued only. Messages go through the Twilio number (placeholder until set), never the founder's personal number.`
+      `${channel}: NOT CONFIGURED — Twilio / AWS SES are not connected, so nothing was sent. The message is queued only. Messages go through the Twilio number (placeholder until set), never the founder's personal number.`
     );
   };
 
@@ -147,7 +147,7 @@ export default function CommunicationHubPreparer() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="client@example.com — no email is sent (Resend not connected)"
+            placeholder="client@example.com — no email is sent (AWS SES not connected)"
             className="mt-1 w-full max-w-sm rounded border border-slate-300 px-2 py-1 text-sm"
           />
         </label>
