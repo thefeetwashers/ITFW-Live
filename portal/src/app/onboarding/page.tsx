@@ -113,8 +113,9 @@ export default function OnboardingPage() {
         </p>
       )}
       <p className="mb-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-        Example — registration is not live until Supabase Auth + migration 0004
-        are connected. No account is created by this page yet.
+        Registration creates a real account now that Supabase Auth is
+        connected. No account is created by this page until you choose a role
+        and submit.
       </p>
       {googleReturn && (
         <p className="mb-4 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800">

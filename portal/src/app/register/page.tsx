@@ -108,9 +108,9 @@ export default function RegisterPage() {
       <p className="mb-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
         Registration posts to <code>/api/register-role</code> (Supabase Auth +
         <code> public.accounts</code> / <code>professional_profiles</code> /
-        <code>student_profiles</code>). Until Supabase is connected that route
-        returns 501 and no account is created. Paid roles route to Stripe
-        Checkout only once Stripe is connected — nothing is charged here.
+        <code>student_profiles</code>). Supabase is connected, so the route can
+        create accounts. Paid roles route to Stripe Checkout — nothing is
+        charged here.
       </p>
       <p className="mb-6 rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
         Immigration with NIPTEI is not a law firm and is not affiliated with

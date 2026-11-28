@@ -31,10 +31,9 @@ export default function HomePage() {
         DOJ-Accredited Representative can give legal advice or represent you.
       </p>
       <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm">
-        Example data on these screens is labelled EXAMPLE. Live sign-in,
-        uploads, chat, payments, and verifications are not live until Supabase
-        env vars are set, migration 0004 has run, and Stripe / email are
-        connected.
+        Example data on these screens is labelled EXAMPLE. The database and
+        payments are connected. Email login codes are not set up yet, so
+        sign-in by email code cannot send a code until email is connected.
       </p>
       <ul className="mt-6 space-y-3">
         <li>
