@@ -74,9 +74,13 @@ Set in Vercel project `itfw-live` (nipteiapp account). Supabase keys are
   (NOT `/api/webhooks/stripe` — that route does not exist).
   Register it in Stripe (Dashboard → Developers → Webhooks) with events
   `checkout.session.completed` + `invoice.paid` — NOT registered yet.
-- `RESEND_API_KEY`, `RESEND_FROM_EMAIL` (login codes + notifications;
-  sender `updates@niptei.com` is UNVERIFIED — needs a verified Resend
-  domain before anything sends from it).
+- AWS SES — platform email sender (replaces Resend, Nov 28, 2026):
+  `AWS_SES_REGION` (default us-east-1 in code), `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, `EMAIL_FROM` (default updates@niptei.com).
+  Login codes + notifications send through SES (see §3B). Resend is
+  NO LONGER the platform sender — do not re-add `RESEND_API_KEY` /
+  `RESEND_FROM_EMAIL`. Sender `updates@niptei.com` is UNVERIFIED until
+  the niptei.com domain identity is verified in SES (see §3B).
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`,
   `TWILIO_WHATSAPP_NUMBER` (each professional's OWN Twilio — platform
   never sends from a personal number).
@@ -263,6 +267,56 @@ for Immigration work.**
 6. **BYO Stripe** (professional back offices): each professional
    connects their own Stripe to charge their own clients — platform
    never holds money or splits legal fees. Not yet wired live.
+
+## 3B. AWS SES — platform email sender (replaces Resend, Nov 28, 2026)
+
+**Founder decision:** the platform sender is AWS SES, not Resend —
+SES costs $0.10 per 1,000 emails with no monthly fee. Resend is NO
+LONGER the platform sender; do not re-add `RESEND_API_KEY` /
+`RESEND_FROM_EMAIL`. (A professional may still connect their OWN
+Resend account as a BYO provider — that is separate, see
+`portal/src/lib/byo.ts`.)
+
+**Portal code (this repo):**
+- `portal/src/lib/email.ts` — single shared sender module
+  (`@aws-sdk/client-ses` 3.1179.0, pinned). Reads `AWS_SES_REGION`
+  (default us-east-1), `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+  `EMAIL_FROM` (default updates@niptei.com). `sendEmail()` returns
+  `email_not_configured` (no network call) when the keys are missing,
+  and `sender_not_verified` / `recipient_not_verified` /
+  `ses_rejected` / `ses_unreachable` on SES failures — it never claims
+  success when SES refused. Keys are never logged or returned.
+- Wired through it: login codes (`src/app/api/auth/login/route.ts`
+  — 6-digit, 10-min, one-use per migration 0020; generation/verify
+  logic unchanged, only the send step), stage notifications
+  (`src/app/api/notify-stage/route.ts` — email channel actually sends
+  via SES when configured, 200 with sentCount; SMS/WhatsApp still
+  logic-only), supervisor confirmation emails
+  (`src/app/api/register-role/route.ts`), unified-thread email
+  (`src/app/api/messages/send/route.ts`), BYO test-send for provider
+  `aws_ses` only (`src/app/api/byo/test-send/route.ts` — to the
+  professional's OWN email, never a client). `/api/reminders` still
+  returns 501 — it takes no recipient payload yet.
+- Smoke test: `portal/scripts/smoke-ses.ts` (FAKE credentials only,
+  no email sent) — 10/10 passed Nov 28, 2026.
+- Verification Nov 28, 2026: `npx tsc --noEmit` exit 0; clean
+  sequential `npm run build` exit 0 (40 routes: 21 API + 19 pages).
+
+**AWS-side steps still needing the founder (NOT done in code):**
+1. In AWS SES, verify the niptei.com domain identity (SES → Verified
+   identities → Create identity → Domain).
+2. Add the DKIM DNS records SES shows into IONOS DNS for niptei.com
+   (SES gives 3 CNAME records; wait for SES to show "Verified").
+3. Request production access out of the SES sandbox (SES → Account
+   dashboard → Request production access) — in sandbox SES only sends
+   to verified addresses, so no client would receive a login code.
+4. Create an IAM user/key with `ses:SendEmail` only (least privilege),
+   for the portal.
+5. Set the four env vars in Vercel project `immigration-niptei`
+   (Production + Preview): `AWS_SES_REGION`, `AWS_ACCESS_KEY_ID`,
+   `AWS_SECRET_ACCESS_KEY`, `EMAIL_FROM` — then redeploy.
+6. Send one real test login code to the founder's own email and confirm
+   it arrives before telling clients login works.
 
 ## 4. Portal — what is built (all in `portal/`)
 
@@ -702,3 +756,146 @@ returns 501 until the Stripe keys are set in Vercel and the webhook is
 registered — do not claim payments work until both are done and a
 Checkout Session has been created in a live test. The static live site
 (`immigration.niptei.com`, v33) is NOT the portal.
+
+## 11. SEO + free-tools lead generator — Search Console / Bing guide (Nov 28, 2026)
+
+The portal's SEO + lead-generator system (free-tools hub, per-form /
+per-topic / per-language landing pages, sitemap, robots, JSON-LD) is
+code in `portal/` — see the full guide in `portal/DEPLOY.md` §15,
+including the exact founder-only steps for Google Search Console and
+Bing Webmaster Tools and the sitemap URL to submit
+(`https://immigration.niptei.com/sitemap.xml`).
+
+Short version: after the portal is deployed, the founder — signed in
+to her own Google and Microsoft accounts — verifies
+`https://immigration.niptei.com/` in Search Console (HTML tag, given
+to the builder for `src/app/layout.tsx`) and in Bing Webmaster Tools
+(or via Bing's "Import from Google Search Console"), then submits the
+sitemap URL above in each. SEO makes the platform findable; it does
+NOT guarantee a ranking, traffic, or clients, and the product says so
+on every public page. One founder decision is still open (portal
+DEPLOY.md §15.4): `/api/leads` refuses enquiries with no professional
+identified, so search traffic with no referral/storefront link cannot
+be saved until the founder designates a platform intake fallback.
+
+## 12. Expert build — coordinator final verification (Nov 28, 2026)
+
+On Nov 28, 2026 the founder delegated a full expert build (26 parallel
+work streams, code + migrations + docs only — nothing deployed, pushed,
+or run live). What was built is in `portal/`; the gap table before/after
+and per-stream reports are in `portal/docs/` (one dated report per
+stream, e.g. `leads-pipeline-2026-11-28.md`, `diy-flow-2026-11-28.md`,
+`standout-five-2026-11-28.md`, `fullstack-sweep-2026-11-28.md`,
+`strengths-weaknesses-2026-11-28.md`, `dashboard-email-2026-11-28.md`).
+
+**Coordinator verification (this pass, Nov 28, 2026, ~6:30 AM EST):**
+- `npx tsc --noEmit` — exit 0.
+- ONE clean sequential `npm run build` (fresh `.next`) — exit 0.
+  52 pages, 60 API routes. No live deploy.
+- All 27 smoke scripts in `portal/scripts/smoke-*.ts` — 27/27 pass
+  (~1,515 checks, fake data only, nothing sent/charged/written).
+- Migrations reconciled: 0021–0036 are now unique and sequential. The
+  build briefly held TWO files named 0030 and TWO named 0033; resolved
+  by rename only, no content changed (`0030_itfw_more_added.sql` →
+  `0035_itfw_more_added.sql`; `0033_itfw_expert_tools.sql` →
+  `0036_itfw_expert_tools.sql`). None of 0021–0036 have been run live.
+- ONE build failure found and fixed in verification: the SEO builder's
+  `src/app/p/[slug]/layout.tsx` and `src/app/r/[code]/layout.tsx`
+  called `metaForPublicPath("/p/example")!` / `("/r/example")!`, but
+  the sitemap guard rightly rejects `/p/` and `/r/` paths without a
+  real slug/code, so both returned null and the build crashed reading
+  `.title`. Fixed by exporting `STOREFRONT_META` / `REFERRAL_META`
+  from `src/lib/seo.ts` and using them directly in both layouts
+  (same copy, no invented slug). Build passes after the fix.
+- Five smoke tests failed on first run and were fixed in verification:
+  three read migration files by their old names (paths updated to
+  0035/0036); `smoke-paywall-interview` expected 5 paywall-audit
+  surfaces but the audit now honestly lists 6 (`packet_rescue_fix`
+  added by the standout-five builder — test updated to 6);
+  `smoke-expert-additions` barred any migration filename containing
+  "expert", which the later expert-tools migration (0036) now trips —
+  narrowed to safety/privacy migrations, which is what that builder
+  was barred from adding.
+
+**What the build added (high level):** lead generator + pipeline,
+case-status sync, instant-answer chat wired into messaging, 6 role
+cheatsheets, interview prep (63 questions, 25 official civics) +
+6 video scripts (scripts only — no video produced), server-side
+paywall gating, 4 role dashboards, guided DIY flow with pay-to-unlock
+$25/$99 + save-and-resume + auto-transfer to the form, form chaining
+for the Green Card Bundle, quote requests, case-aware news, daily home
+(/today), case tracking + NVC with the honest "cannot see inside the
+officer's file" note, USCIS/NVC/Embassy backbone, family-in-one-case,
+7 languages, Packet Rescue free check, verified flat-price directory,
+renewal radar, fee-waiver checker, cost estimator, vault expiry,
+Journey Map + tell-a-friend + SEO foundation, professional discovery +
+Google (not connected) + document resend, 20 differentiators, biometrics
+tracker, AR-11 helper, emergency guide, sponsor calculator, Quick Exit,
+scam guide, privacy page, printable guides, full-stack sweep (RLS
+gapfill migration 0031, audit logging, rate limits, error handling),
+strengths/weaknesses review + business tools (migration 0032),
+SEO + free-tools hub (migration 0033), expert tools — e-sign,
+video meetings, OCR (kept honestly unavailable), translation orders,
+receipts, founder analytics, case export (migration 0036) — and
+in-dashboard email with 32 drafted templates (migration 0034).
+
+**Webhook fix (Nov 28, 2026, URGENT — landed before any push/deploy):**
+The Stripe webhook gap found in this build is FIXED in code (not yet
+deployed, migration 0037 not yet run live):
+- `portal/src/lib/webhookRecords.ts` (new) — the database writes for
+  a verified `checkout.session.completed`, testable without Stripe
+  or Supabase; `portal/src/app/api/stripe/webhook/route.ts` now only
+  verifies the signature, applies the monthly 6/12 stop, and
+  delegates the writes. `portal/src/app/api/checkout/route.ts` now
+  puts `form_code` in the Checkout Session metadata (validated DIY
+  registry code first, else the single Price's locked formCode).
+- On `checkout.session.completed` (paid): the invoices row now
+  carries `form_code`; a DIY purchase writes a `diy_unlocks` row
+  (migration 0024) — form_code / is_bundle / price / Stripe
+  checkout session id, status 'paid'; a subscription purchase
+  writes a `subscriptions` row (migration 0037, new table) —
+  account + locked price key/id + plan + status 'active' + Stripe
+  subscription/customer/checkout ids. professional_profiles plan +
+  status set to 'active' (is_published ONLY when already verified);
+  student_profiles.subscription_status set to 'active' for the Law
+  Student price (migration 0037 added the column). All three writes
+  are idempotent on replay (invoice by case+client+description /
+  stripe_invoice_id; unlock by checkout session id; subscription
+  by stripe_subscription_id) — a replayed event never double-writes.
+- `src/lib/paywall.ts` now reads `public.subscriptions` and
+  `student_profiles.subscription_status`, so a paying Member
+  ($9.80/mo) or Law Student ($35/mo) with no case — and therefore
+  no invoices row — is recognised and allowed. Until migration
+  0037 is run live, the reader treats a missing subscriptions
+  table as "no rows" and the old denial stands.
+- `invoice.paid` still marks the matching invoice paid by
+  stripe_invoice_id (no row invented) and now also flips a
+  matching subscriptions row back to 'active'.
+- Verification: new `portal/scripts/smoke-webhook-fix.ts` — 44/44
+  assertions pass (fake Stripe signature at route level, fake
+  in-memory Supabase for the writes; no real keys, nothing
+  charged); `smoke-stripe.ts` 22/22, `smoke-paywall-interview.ts`
+  56/56, `smoke-diy-flow.ts` 201/201 all still pass; `npx tsc
+  --noEmit` exit 0; ONE clean sequential `npm run build` (fresh
+  `.next`) exit 0. Locked prices untouched (still 132).
+- One deliberate narrowing: the webhook no longer touches
+  professional_profiles for a bundle-monthly subscription (a client
+  buying a bundle is not a professional); professional keys
+  (preparer/attorney/DOJ/employer) behave exactly as before.
+- Migration 0037 `0037_itfw_webhook_subscription_records.sql`:
+  creates `public.subscriptions` + adds
+  `student_profiles.subscription_status`. Written, NOT run live —
+  run 0001–0037 in order before relying on paywall enforcement.
+
+**Still NOT live / still needs the founder (unchanged from §7–§10):**
+SES keys in Vercel + niptei.com verification + DKIM + production
+access; §7a decision (founder/admin DB read of client documents);
+real login test end-to-end; real video production; USCIS Production
+API (Sandbox only); live SMS (Twilio not connected); Google Cloud
+OAuth consent; submitting the sitemap to Search Console/Bing;
+designating a platform intake fallback for search traffic (see §11);
+referral reward amount ("to be announced"); migration 0037 must be
+run live (with 0001–0037) before the webhook fix takes effect —
+until then the paywall still denies a paying member/student.
+Migrations 0021–0037 are written, not run live. The public v33 site
+(`immigration.niptei.com`) is unchanged and frozen.
