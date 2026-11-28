@@ -886,6 +886,8 @@ and no number was duplicated.
 - **Twilio + Resend/SendGrid + Google Translate + e-signature:** skeletons return 501 / `not_configured` until keys exist. BYO per professional. Renewal nudges (48h, client's language) and appointment reminders (24h + 1h) are QUEUED only — nothing is ever claimed sent.
 - **E-signature (explicit):** NO e-signature provider is connected. Status is tracked only (`src/components/comms/CaseTools.tsx`, `src/components/DynamicFormIntakeEngine.tsx`); signatures are collected only once a provider is connected, and a law-student draft unlocks for client E-Sign only after supervisor approval. 501 / `not_configured` until a provider + keys exist.
 - **Tesseract / OCR:** NO unpinned CDN is loaded anywhere in the portal (verified Nov 20, 2026 — zero external script/CDN loads in `portal/src`). OCR is labelled "not available until the library is pinned" in the company back office. Do not add a Tesseract CDN script without a pinned version + SRI `integrity=` hash; if pinning cannot be verified, keep the CDN load removed.
+- **Tesseract / OCR (Nov 28, 2026 — expert tools):** pinning verdict is now in `src/lib/expertTools.ts` OCR_STATUS: NO OCR library is installed, and pinning the npm package alone would NOT pin what runs — tesseract.js (latest 7.0.0, registry reachable Nov 28, 2026) downloads its worker script + trained language data from a CDN at runtime by default. Safe pinning needs pinned npm package + self-hosted worker + traineddata (or pinned SRI-hashed script + pinned data URLs), verified by hash. Until that is built, OCR stays unavailable and no text is extracted.
+- **Expert tools (Nov 28, 2026 — founder's question):** `src/lib/expertTools.ts` + migration 0033. E-sign: in-platform typed signature completion (POST /api/signatures/sign) over the 0001 signatures table; no outside provider connected. Video: manual pasted link via bookings PATCH (Google Meet NOT connected, no fake links). Translation orders: POST /api/translation-orders, locked $45/page, status pending, payment confirmed only by the Stripe webhook. Receipts: GET /api/invoices/[id]/receipt, USCIS fee always on its own line. Founder analytics: roll-up over real rows in reporting.ts (subscription revenue excluded — no subscriptions table). Export: GET /api/export/case, printable manifest, audit-logged. Smoke: `npx -y tsx scripts/smoke-expert-tools.ts` (73 checks, fake data only).
 - **EOIR roster links** (checked Nov 14, 2026): roster PDF `https://www.justice.gov/eoir/media/1398081/dl?inline`, roster-reports page `https://www.justice.gov/eoir/recognition-accreditation-roster-reports`, R&A Program page `https://www.justice.gov/eoir/recognition-and-accreditation-program`. Florida tip in the component: Ctrl+F / Cmd+F "Florida" in the by-state PDF.
 
 ### 13e. Retry verification (Nov 20, 2026 — this pass)
@@ -1117,3 +1119,152 @@ Live setup — guide only, nothing here is live:
 - **Security:** email code every login still applies to EMAIL logins. Google logins use Google's own verification — no second email code on top of Google, no Google password stored, the Google token is never logged. A user's Google email is shown only to the user themselves, to their assigned professional, and to the Founder/Admin verification queue where the role requires it — never to other users, never in a URL, never logged.
 - **What is still NOT live:** Supabase env vars in Vercel (`NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` — NOT yet set, Vercel sign-in still waiting) · portal deployment (the portal is not deployed, so no Google login can complete end-to-end yet) · no live Google sign-in has been tested against the deployed portal. Until both are done, the button stays disabled with the note above.
 - **Teacher addendum (Nov 19, 2026 — same day, second pass):** the first pass left Teacher out of `/api/google-profile` and the Google-mode teacher form claimed "active (example)" with no account row. Fixed: `google-profile` now accepts role `teacher` (writes `public.accounts` role `teacher` + `public.teacher_profiles` from migration 0004, `onboarding_status` `pending_verification` — an admin must approve a teacher before they can confirm students, so nobody can self-confirm as a "teacher" and approve their own student account); the Google-mode teacher form in `RoleForms.tsx` now posts to `/api/google-profile` instead of the example completion (email-mode teacher form is unchanged — teacher is not an email register role). `roleDestination("teacher")` in `src/lib/googleAuth.ts` is now `/teacher-dashboard`, matching email login (`redirectAfterLogin` in `src/lib/loginCodes.ts`) — it was wrongly `/admin/verifications`, which is the Founder/Admin queue. NOTE: no `/teacher-dashboard` page exists in the app yet, for either login path — that page is still to be built; until then a teacher lands on a 404 rather than inside the admin queue.
+
+## 15. SEO + free-tools lead generator — Search Console / Bing Webmaster verification guide (Nov 28, 2026)
+
+> **What this section is.** The portal's SEO foundation (`src/lib/seo.ts`,
+> `src/app/sitemap.ts`, `src/app/robots.ts`, per-form / per-topic /
+> per-language landing pages, JSON-LD) and the free-tools lead generator
+> (`/free-tools` hub + the five free tools) are code in this repo. They
+> make the platform **findable** in Google, Yahoo, and Bing. They do NOT
+> guarantee a ranking, a number-one spot, traffic, or clients — no one
+> can promise that, and the product says so on every public page
+> (`SEO_NO_RANKING_NOTE`). Search engines list the pages; people find
+> them; the free tools and the enquiry form turn finders into leads.
+> No tracking of individual searchers, no bought lists, no fake
+> reviews/testimonials.
+
+### 15.1 What is already live in code (nothing to submit yet)
+
+- Sitemap (public pages only — no dashboard, portal, family, auth, or
+  API URL ever appears): `https://immigration.niptei.com/sitemap.xml`
+  — generated by `src/app/sitemap.ts` from `src/lib/seo.ts`
+  `sitemapEntries()`. It lists the home page, `/leads`, the `/free-tools`
+  hub + both tool pages, `/professionals`, `/for-professionals`,
+  `/glossary`, `/journey`, `/your-rights`, `/cheatsheets` + all 6 role
+  pages, `/fee-waiver`, `/packet-rescue`, `/intake`, `/onboarding`,
+  `/diy`, `/interview-prep`, `/backbone`, `/safety` + its 3 sub-pages,
+  `/reviews/new`, all 9 `/topics/<slug>` pages, all 7 `/lang/<code>`
+  pages, and one page per form in the locked catalog (`/forms/<code>`).
+  Storefront URLs (`/p/<slug>`) are NOT listed until a profile is
+  actually published — no slug is ever invented. Referral URLs
+  (`/r/<code>`) are never listed.
+- Robots: `https://immigration.niptei.com/robots.txt` — public pages
+  crawlable; portal, dashboards, family, auth, API, and admin
+  disallowed; points at the sitemap above.
+- Every public page carries a meta title + description
+  (`src/lib/seo.ts` `PUBLIC_PAGE_META` + `metaForPublicPath()`; client
+  pages carry theirs in a `layout.tsx` in the same segment).
+- Structured data (JSON-LD) only where the content already exists:
+  Organization + FAQ on `/`, FAQ on `/forms/<code>`, HowTo (from the
+  existing lead-loop steps) on `/free-tools` and
+  `/topics/getting-started`. No other page claims FAQ/HowTo data.
+
+### 15.2 What only the founder can do (from her own accounts)
+
+Nobody else can do these steps — they need the founder signed in to
+her Google and Microsoft accounts. Do them **after the portal is
+deployed** (the sitemap URL must return the live sitemap, not a 404)
+and after migration 0033 has run (so tool leads store `tool_used`).
+
+**Google Search Console — https://search.google.com/search-console**
+
+1. Sign in with the founder's Google account (the one that owns the
+   Google for Nonprofits / Ad Grants account — do NOT create a new
+   Google account for this).
+2. Add property → **URL prefix** → enter exactly
+   `https://immigration.niptei.com/` → Continue.
+3. Verify ownership. Pick **HTML tag** (easiest): copy the
+   `<meta name="google-site-verification" content="...">` tag Google
+   shows. Give that tag to the portal builder — it goes into
+   `src/app/layout.tsx` `metadata.verification.google` (code change,
+   then redeploy). Do NOT paste the tag anywhere else, and do NOT use
+   the DNS method unless the builder asks for it (DNS lives with the
+   domain registrar, and a wrong DNS edit can take the site down).
+   Alternative if the tag route stalls: **Google Analytics** — only if
+   Google Analytics is already on the site, which it is not today.
+4. After verification shows as confirmed, go to **Sitemaps** (left
+   menu) → enter exactly `sitemap.xml` → Submit. The full sitemap URL
+   being submitted is `https://immigration.niptei.com/sitemap.xml`.
+5. Wait. Google reads the sitemap on its own schedule — days to
+   weeks. Check **Pages** (under Indexing) after a week: it shows
+   which submitted pages were indexed and which were not, with a
+   reason per page. Fix only what it names; do not resubmit daily.
+
+**Bing Webmaster Tools — https://www.bing.com/webmasters**
+
+1. Sign in with the founder's Microsoft account.
+2. Add site → enter exactly `https://immigration.niptei.com/` →
+   Add. (Bing covers Yahoo search results too — one submission
+   reaches both.)
+3. Verify ownership. Pick **HTML tag** (same pattern as Google): copy
+   the `<meta name="msvalidate.01" content="...">` tag and give it to
+   the portal builder — it goes into `src/app/layout.tsx`
+   `metadata.verification.other` (code change, then redeploy).
+   Shortcut: if Google Search Console verification is already done,
+   Bing offers **Import from Google Search Console** — use that
+   instead of a second tag; it copies the verified property and the
+   sitemap in one step.
+4. After verification, go to **Sitemaps** → Submit sitemap → enter
+   exactly `https://immigration.niptei.com/sitemap.xml` → Submit.
+5. Check **URL Inspection** / **Site Explorer** after a few days for
+   crawl errors. Fix only what it names.
+
+### 15.3 What to expect — and what NOT to expect
+
+- Expect: pages become findable in search over days–weeks; Search
+  Console / Bing show impressions and clicks per page and per query
+  (aggregate counts only — never who searched).
+- Do NOT expect: a ranking position, a number of visitors, or a
+  number of clients by any date. Nobody can promise those, and this
+  platform never claims them. If anyone offers "guaranteed #1 on
+  Google" for money, that is a scam — say no.
+- The lead generator works the same honest way: people who arrive
+  use a free tool, and — only if they choose — leave their details
+  for one follow-up. The tools do not watch searchers.
+
+### 15.4 Free-tools lead generator — how it converts (code reference)
+
+- Hub: `/free-tools` — all five tools, one line + CTA each
+  (`src/lib/freeTools.ts` FREE_TOOLS; page `src/app/free-tools/page.tsx`).
+  Share buttons on the hub and on both tool pages (plain links, no
+  tracking parameters).
+- Packet Health Check + fee calculator: existing tools, public entry
+  `/diy` (`src/lib/diyHealthCheck.ts`, `src/lib/diyFees.ts`).
+- Interview question of the day: existing, entry `/today`
+  (`src/lib/dailyHome.ts questionOfTheDay()`). Free once signed in
+  and interview-prep access is confirmed — the hub says so.
+- Sponsor income checker: NEW public UI
+  (`src/app/free-tools/sponsor-income` +
+  `src/components/free-tools/SponsorIncomeChecker.tsx`) over the
+  existing locked qualifier (`src/lib/formChecklists.ts`
+  `sponsorShortfallCheck`). Runs in the browser; income never stored.
+- Visa Bulletin date checker: NEW public UI
+  (`src/app/free-tools/visa-bulletin` +
+  `src/components/free-tools/VisaBulletinChecker.tsx`) over the
+  existing matcher (`src/lib/visaBulletin.ts matchPriorityDate`). No
+  cutoff dates are stored — the visitor enters the cutoff from
+  travel.state.gov.
+- Follow-up nudge: after a tool is used, `ToolLeadCapture`
+  (`src/components/leads/ToolLeadCapture.tsx`) OFFERS a capture
+  (name/phone/email/service) with the honest what-happens-next note
+  (one follow-up, never spam, details never sold). It posts to the
+  EXISTING `/api/leads` route with `toolUsed` + `arrivalChannel`;
+  migration 0033 adds `preparer_leads.tool_used`.
+- **Open founder decision (not decided in code):** `/api/leads`
+  deliberately refuses when no professional is identified (no
+  `?provider=<slug>` or `?ref=<code>`) — a lead is never assigned to
+  a guessed preparer. A visitor who arrives from search with no link
+  therefore sees the honest routing note and links to pick a
+  professional, instead of their enquiry being saved. To let search
+  traffic convert directly, the founder must designate a platform
+  intake fallback (for example, the platform intake account that
+  already receives quote requests at nipteiapp@gmail.com) and say so
+  in her own words. Until then, the hub preserves `?ref=` /
+  `?provider=` through every tool link, so referred visitors convert.
+- Referral + share (verified Nov 28, 2026): `ReferralCard` is on the
+  client dashboard, the preparer home, the attorney home (added Nov
+  28 — it was missing there), and the portal; `ClientInviteCard` is
+  on the preparer home and the attorney home (added Nov 28). The
+  Journey Map is shared only through the family invite system —
+  there is no public link to a private case, and none is created.

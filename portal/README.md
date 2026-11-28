@@ -16,7 +16,7 @@ Env vars (`.env.local` / Vercel, never in code): `NEXT_PUBLIC_SUPABASE_URL`,
 `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`,
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`,
 `TWILIO_WHATSAPP_NUMBER`,
-`RESEND_API_KEY` (or `SENDGRID_API_KEY`).
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SES_REGION`, `EMAIL_FROM` (platform email is AWS SES — see below; Resend is no longer the platform sender).
 
 ## Routes
 
@@ -31,7 +31,7 @@ Env vars (`.env.local` / Vercel, never in code): `NEXT_PUBLIC_SUPABASE_URL`,
 | `/admin/verifications` | Founder/Admin verification queue (bar/EOIR), Approve/Reject-with-reason, audit log |
 | `/back-office` | Role-adaptive back office (preparer / attorney / nonprofit / law student / platform admin). G-28 hidden for preparers; students see only assigned cases |
 | `/legal-back-office` | Legal Back Office — roles 3 (attorney) / 4 (DOJ nonprofit) / 5 (law student) only; G-28/EOIR-28 gates, student supervision |
-| `/company-back-office` | Company back office — left rail / center workspace / right comms hub; Twilio/Resend/video/E-Sign honestly labelled not connected |
+| `/company-back-office` | Company back office — left rail / center workspace / right comms hub; Twilio/AWS SES/video/E-Sign honestly labelled not connected |
 | `/preparer-dashboard` | Preparer Command Center: identity card (A-Number masked), billing pipeline, USCIS/NVC hub, family invites, compliance guardrails |
 | `/family-portal/[token]` | Token-gated family/co-sponsor view (status + missing items + upload slots only; invoices hidden unless `can_view_invoices`) |
 | `/p/[slug]` | Public profile / storefront — VERIFIED + published profiles only (via the `public_profiles` view, migration 0013); quote + order requests go to that professional's Lead Sheet (`preparer_leads`) |
@@ -39,12 +39,12 @@ Env vars (`.env.local` / Vercel, never in code): `NEXT_PUBLIC_SUPABASE_URL`,
 | `/api/checkout` | Real Checkout Session endpoint — validates Price IDs against the locked map (132 Prices, `src/lib/stripePrices.ts`); 501 until STRIPE_SECRET_KEY is set |
 | `/api/reminders` | Skeleton — 501 until Twilio + email provider exist |
 | `/api/pdf/autofill` | Skeleton — 501 until official USCIS PDF templates exist (pdf-lib IS installed) |
-| `/api/notify-stage` | Stage notifications — 501 until Twilio/Resend configured; templates in `src/lib/notificationTemplates.ts` (7 languages) |
+| `/api/notify-stage` | Stage notifications — email sends via platform AWS SES when configured (200 + sentCount); SMS/WhatsApp still 501; templates in `src/lib/notificationTemplates.ts` (7 languages) |
 | `/api/register-role` | Role Registration API — 501 until Supabase env set; `is_verified` always false at registration |
 | `/api/generate-packet` | PDF packet generator (pdf-lib) — 409 unless packet audit is 100% with no blocking items; 402 while a balance is due; DRAFT watermark, never auto-filed |
 | `/api/templates/check` | USCIS template field-check (pdf-lib) — compares a PDF's AcroForm fields with `src/lib/uscisFieldMappings.ts` |
 | `/api/translate` | 501 / "translation not configured" until `GOOGLE_TRANSLATE_API_KEY` is set (and a Google Cloud client is installed); never returns a fake translation |
-| `/api/messages/send` | Unified Thread send — 501 / `not_configured` until Supabase (Portal Chat) or the professional's own Twilio / Resend / SES is connected; never claims a message was sent |
+| `/api/messages/send` | Unified Thread send — email sends via platform AWS SES when configured; 501 / `not_configured` until Supabase (Portal Chat) or Twilio is connected; never claims a message was sent |
 | `/api/byo/test-send` | BYO test-send to the professional's OWN email/phone only — 501 until that provider is connected; never to a client |
 
 ## Shared logic (`src/lib/`)
@@ -110,6 +110,24 @@ Isolation re-test with real rows is still open (the DB holds no user
 data yet). **Do NOT wire Supabase Auth live until the founder decides
 0003 §7a** (founder/admin DB read of client documents).
 
+## Platform email — AWS SES (Nov 28, 2026)
+
+The platform sender is **AWS SES** ($0.10 per 1,000 emails, no monthly
+fee), replacing Resend. Shared module `src/lib/email.ts`
+(`@aws-sdk/client-ses` 3.1179.0, pinned) — env vars
+`AWS_SES_REGION` (default us-east-1), `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `EMAIL_FROM` (default updates@niptei.com).
+Wired through it: login codes, stage-notification email, supervisor
+confirmation emails, unified-thread email, BYO test-send (`aws_ses`
+only, to the professional's own email). Missing keys → honest
+`email_not_configured` (501); SES verification failures surface as
+`sender_not_verified` / `recipient_not_verified`, never success.
+Smoke test `scripts/smoke-ses.ts` (FAKE credentials only) passes
+10/10. **Still AWS-side, not done in code:** verify niptei.com in SES,
+add the DKIM records in IONOS, request production access out of the
+sandbox, create the least-privilege IAM key, set the four env vars in
+Vercel project `immigration-niptei`, redeploy. See DEPLOY.md §3B.
+
 ## What is NOT live
 
 Supabase Auth / env vars in Vercel · Stripe keys in Vercel + webhook
@@ -117,7 +135,7 @@ endpoint registration in Stripe (checkout + webhook are WIRED in code —
 `src/lib/stripePrices.ts` locked map of 132 LIVE Prices,
 `src/app/api/checkout/route.ts`, `src/app/api/stripe/webhook/route.ts`;
 both return 501 until the keys are set, so nothing charges yet) ·
-Twilio/Resend sending · Google Cloud Translation (UI + mapping only) ·
+Twilio sending · AWS SES email (code wired, sender unverified — see below) · Google Cloud Translation (UI + mapping only) ·
 USCIS Production key + worker (Sandbox only; receipt/status/deadlines
 are EXAMPLE) · NVC/CEAC (manual link-out, no API, never store a CEAC
 password) · carrier API (link-outs only) · certified-translation
@@ -126,3 +144,25 @@ fulfilment (requests only, no price/provider invented) · refund policy
 the official USCIS templates). All example data (Jane Doe, Alex M.,
 IOE0928374651, INV-2049) is labelled EXAMPLE in the UI and code. No login,
 upload, chat message, payment, or verification is live until wired + tested.
+
+## Expert build (Nov 28, 2026) — coordinator-verified
+
+26 parallel work streams, code + migrations + docs only. `npx tsc
+--noEmit` exit 0; ONE clean `npm run build` (fresh `.next`) exit 0
+(52 pages, 60 API routes); all 27 smoke scripts in
+`scripts/smoke-*.ts` pass 27/27 (~1,515 checks, fake data only).
+Migrations 0021–0036 are unique and sequential (two 0030s and two
+0033s were resolved by rename only). Per-stream reports in `docs/`
+(one dated report per stream). Still not live: migrations 0021–0036
+(written, not run), SES keys/verification, §7a decision, real login
+test, video production, USCIS Production API, live SMS, Google OAuth
+consent, sitemap submission. Former gap (fixed Nov 28, 2026): the Stripe webhook wrote no
+`invoices.form_code` and no `diy_unlocks` / student/member
+subscription rows — FIXED Nov 28, 2026 (see `../DEPLOY.md` §12,
+"Webhook fix"): the webhook now writes `invoices.form_code`, a
+`diy_unlocks` row, and a `subscriptions` row (new migration 0037);
+the paywall reads the subscriptions row, so a paying Member or Law
+Student is recognised. Migration 0037 is written, not run live —
+run 0001–0037 in order before relying on paywall enforcement.
+New smoke test `scripts/smoke-webhook-fix.ts` — 44/44 pass.
+See `../DEPLOY.md` §12 for the full verification record.
