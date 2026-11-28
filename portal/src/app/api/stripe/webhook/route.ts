@@ -16,15 +16,48 @@
 //         case_id, client_id, description, service_fee_cents, status,
 //         stripe_invoice_id) when the session metadata carries a
 //         case_id + account_id. Without them, no invoice row is invented.
-//       - For a professional subscription (metadata account_id + a
-//         subscription price): sets professional_profiles
-//         .subscription_status = 'active', and flips is_published = true
-//         ONLY when accounts.verification_status is already 'verified'.
+//         FIX (Nov 28, 2026, migration 0037): the invoice row now
+//         carries form_code (from session metadata, else from the
+//         locked Price's formCode) — before this fix it was never
+//         written, so a paid single-form payment could not prove
+//         WHICH form was paid for.
+//       - DIY purchase (diy_form / diy_bundle): writes a diy_unlocks
+//         row (migration 0024) — client + case + form_code (NULL =
+//         case-scoped / bundle) + is_bundle + price + Stripe
+//         checkout session id, status 'paid'. Idempotent on the
+//         checkout session id: a replayed event never creates a
+//         second unlock.
+//       - Subscription purchase (Member / Law Student / Preparer /
+//         Attorney / DOJ / Employer): writes a subscriptions row
+//         (migration 0037) — account + locked price key/id + plan +
+//         status 'active' + Stripe subscription / customer /
+//         checkout ids. Idempotent on stripe_subscription_id. This
+//         is the record the paywall reads for a payer with no case
+//         (a Member / Law Student checkout carries no case_id, so
+//         no invoices row can exist for them). professional_profiles
+//         .subscription_plan + subscription_status are set to
+//         'active' for professional prices, and
+//         student_profiles.subscription_status to 'active' for the
+//         Law Student price. is_published flips to true ONLY when
+//         accounts.verification_status is already 'verified'.
 //         Listing never turns on from payment alone.
+//       - Pay in 3: marks Instalment 1 as paid on the payment_plans
+//         row the checkout route created.
+//   * checkout.session.completed with metadata.translation_order_id —
+//     flips that translation_orders row (migration 0033)
+//     payment_status to 'paid'. Order status stays 'pending' until a
+//     real translation is delivered — payment is not delivery.
 //   * invoice.paid — marks the matching public.invoices row (by
 //     stripe_invoice_id) 'paid' with paid_at. If no row matches, the
-//     event is acknowledged with a warning — no row is invented.
+//     event is acknowledged with a warning — no row is invented. A
+//     matching subscriptions row is also flipped to 'active'.
 //   * Everything else: acknowledged, ignored.
+//
+// The database writes live in src/lib/webhookRecords.ts so they can
+// be tested without Stripe or Supabase (see
+// scripts/smoke-webhook-fix.ts — an in-memory fake admin client).
+// This route only verifies the signature, applies the monthly stop
+// (which needs the Stripe client), and delegates the writes.
 //
 // The 50% missed-payment rule has NO Stripe setting and is NOT enforced
 // here — it is displayed to the client and handled manually.
@@ -34,6 +67,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { applyMonthlyStop, getStripe } from "@/lib/stripeClient";
+import {
+  recordCheckoutCompleted,
+  recordInvoicePaid,
+  type AdminClient,
+} from "@/lib/webhookRecords";
 
 export const runtime = "nodejs";
 
@@ -84,9 +122,6 @@ export async function POST(req: Request) {
 
   const warnings: string[] = [];
   const admin = getServiceClient();
-  if (!admin) {
-    warnings.push("Supabase is not configured — no invoice or listing was recorded in the database.");
-  }
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as {
@@ -95,15 +130,11 @@ export async function POST(req: Request) {
       payment_status?: string;
       subscription?: string | null;
       invoice?: string | null;
-      customer_details?: { email?: string | null } | null;
+      customer?: string | null;
       metadata?: Record<string, string> | null;
     };
     const meta = session.metadata ?? {};
     const plan = meta.plan ?? "";
-    const caseId = meta.case_id ?? "";
-    const accountId = meta.account_id ?? "";
-    const totalCents = Number(meta.total_cents ?? "0") || 0;
-    const priceKey = meta.price_key ?? "";
 
     // 1) Bundle Monthly: apply the 6/12-payment stop.
     if ((plan === "monthly_6" || plan === "monthly_12") && session.subscription) {
@@ -120,77 +151,25 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2) Record the paid invoice (only with a real case + account).
-    if (admin && caseId && accountId) {
-      const paid = session.payment_status === "paid";
-      const { error } = await admin.from("invoices").insert({
-        case_id: caseId,
-        client_id: accountId,
-        provider_id: null,
-        description: `${priceKey || "service"} — ${plan}`,
-        service_fee_cents: totalCents,
-        uscis_fee_cents: 0,
-        status: paid ? "paid" : "open",
-        stripe_invoice_id: session.invoice ?? null,
-        stripe_checkout_url: null,
-        paid_at: paid ? new Date().toISOString() : null,
-      });
-      if (error) warnings.push(`Invoice could not be recorded: ${error.message}.`);
-      // Pay in 3: mark Instalment 1 as paid on the payment_plans row
-      // the checkout route created (paid_cents was 0 at session
-      // creation — nothing is paid until Stripe confirms it here).
-      if (paid && meta.installment === "1_of_3") {
-        const firstCents = Number(meta.installment_amount_cents ?? "0") || 0;
-        const { error: planError } = await admin
-          .from("payment_plans")
-          .update({ paid_cents: firstCents })
-          .eq("case_id", caseId)
-          .eq("pay_choice", "installments_3")
-          .eq("status", "active");
-        if (planError) warnings.push(`Instalment 1 could not be marked paid: ${planError.message}.`);
-      }
-    } else if (admin && !caseId) {
-      warnings.push("No case_id in the Checkout Session metadata — no invoice row was recorded.");
-    }
-
-    // 3) Professional subscription: mark active; publish ONLY if verified.
-    if (admin && accountId && session.mode === "subscription" && session.subscription) {
-      const { data: account } = await admin
-        .from("accounts")
-        .select("verification_status, role")
-        .eq("id", accountId)
-        .single();
-      const verified = (account as { verification_status?: string } | null)?.verification_status === "verified";
-      const { error } = await admin
-        .from("professional_profiles")
-        .update({
-          subscription_status: "active",
-          ...(verified ? { is_published: true } : {}),
-        })
-        .eq("account_id", accountId);
-      if (error) {
-        warnings.push(`Subscription status could not be recorded: ${error.message}.`);
-      } else if (!verified) {
-        warnings.push("Subscription is active, but the directory listing stays OFF until verification is approved.");
-      }
-    }
+    // 2) Database records — invoice (with form_code), Pay-in-3,
+    //    translation order, DIY unlock, subscription record.
+    //    See src/lib/webhookRecords.ts. When Supabase is not
+    //    configured the helper records a warning and writes nothing.
+    const recorded = await recordCheckoutCompleted(
+      admin as unknown as AdminClient | null,
+      session
+    );
+    warnings.push(...recorded.warnings);
     return NextResponse.json({ received: true, event: event.type, warnings });
   }
 
   if (event.type === "invoice.paid") {
     const invoice = event.data.object as { id: string; subscription?: string | null };
-    if (admin) {
-      const { data, error } = await admin
-        .from("invoices")
-        .update({ status: "paid", paid_at: new Date().toISOString() })
-        .eq("stripe_invoice_id", invoice.id)
-        .select("id");
-      if (error) {
-        warnings.push(`Invoice ${invoice.id} could not be marked paid: ${error.message}.`);
-      } else if (!data || data.length === 0) {
-        warnings.push(`Invoice ${invoice.id} was paid in Stripe but has no matching public.invoices row — no row was invented.`);
-      }
-    }
+    const recorded = await recordInvoicePaid(
+      admin as unknown as AdminClient | null,
+      invoice
+    );
+    warnings.push(...recorded.warnings);
     return NextResponse.json({ received: true, event: event.type, warnings });
   }
 

@@ -1358,7 +1358,7 @@ export default function PublicProfilePage({ params }: { params: { slug: string }
             </p>
             {photoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={photoUrl} alt={`Photo of ${displayName}`} className="mt-3 h-32 w-32 rounded-full object-cover" />
+              <img src={photoUrl} alt={`Photo of ${displayName}`} loading="lazy" width={128} height={128} className="mt-3 h-32 w-32 rounded-full object-cover" />
             ) : (
               <p className="mt-3 text-sm text-slate-500">No photo provided.</p>
             )}

@@ -6,6 +6,8 @@ import PortalShell, { type PortalViewAs } from "@/components/portal/PortalShell"
 import TranslationOrders from "@/components/portal/TranslationOrders";
 import CoSponsorInviteCard from "@/components/portal/CoSponsorInviteCard";
 import { CaseChat, InterviewPrep } from "@/components/portal/CaseChat";
+import InstantAnswerChat from "@/components/copilot/InstantAnswerChat";
+import RoleCheatsheet from "@/components/cheatsheets/RoleCheatsheet";
 import AskNipteiChat from "@/components/copilot/AskNipteiChat";
 import UnifiedThread from "@/components/comms/UnifiedThread";
 import TierSummary from "@/components/comms/TierSummary";
@@ -22,6 +24,9 @@ import ComplianceTrail from "@/components/portal/ComplianceTrail";
 import CeacTracker from "@/components/portal/CeacTracker";
 import ReviewsSection from "@/components/portal/ReviewsSection";
 import RenewalsSection from "@/components/portal/RenewalsSection";
+import FeeWaiverCheckerSection from "@/components/dashboard/FeeWaiverCheckerSection";
+import TotalCostEstimatorSection from "@/components/dashboard/TotalCostEstimatorSection";
+import VaultExpirySection from "@/components/dashboard/VaultExpirySection";
 import InterviewMedicalCard from "@/components/portal/InterviewMedicalCard";
 import ReferralCard from "@/components/portal/ReferralCard";
 import ServiceCatalog from "@/components/portal/ServiceCatalog";
@@ -32,6 +37,8 @@ import DeadlineRadar from "@/components/portal/DeadlineRadar";
 import TranslationPhotoTracker from "@/components/portal/TranslationPhotoTracker";
 import FamilyTreeRoster from "@/components/portal/FamilyTreeRoster";
 import CaseCommandPanel from "@/components/nextstep/CaseCommandPanel";
+import OneClickActions from "@/components/nextstep/OneClickActions";
+import NotificationInbox from "@/components/nextstep/NotificationInbox";
 import {
   EXAMPLE_CASE,
   EXAMPLE_CHECKLIST,
@@ -103,6 +110,17 @@ export default function PortalPage() {
             Client Portal — Form I-130 (Family Petition)
           </h1>
           <p className="text-sm text-slate-600">{EXAMPLE_CASE.statusLine}</p>
+          {/* Daily home — the screen clients land on every day: status at
+              a glance, today's next step, what changed today, reminders,
+              the interview question of the day, and everything saved. */}
+          <p className="text-sm">
+            <Link
+              href="/today"
+              className="font-semibold text-blue-700 underline"
+            >
+              Today — your daily home: what changed, what is next, and what you saved →
+            </Link>
+          </p>
           {landedCaseId && (
             <p className="rounded border border-green-300 bg-green-50 px-3 py-2 text-sm font-semibold text-green-900">
               Your new application was started — case {landedCaseId}. Your
@@ -112,24 +130,14 @@ export default function PortalPage() {
             </p>
           )}
 
-          {/* ADDITION 1 — Order, Invoice & Process Roadmap (above tracker) */}
-          <OrderSummary />
-          <ProcessRoadmap />
-          <FormsIncluded />
+          {/* Start here — client cheatsheet: first 5 things to do, in order. */}
+          <RoleCheatsheet role="client" compact />
 
-          {/* Smart Guided Intake — start a NEW application. This does not
-              change the example case shown above. Without a
-              professional's storefront slug this page cannot confirm an
-              order: the calculator explains that and the order starts
-              from immigration.niptei.com/p/&lt;slug&gt;. */}
-          <SmartIntakeCalculator />
-
-          {/* Next Step + Stage + Payment + Communication engine — one
-              screen that answers everything. EXAMPLE case is the Family
-              Adjustment Bundle (I-130 + I-485), so the route is inside_us:
-              the tracker shows adjustment steps only, never NVC steps.
-              Daily Command + thread are NOT repeated here — DeadlineRadar
-              is inside the panel and the unified thread is in the sidebar. */}
+          {/* Final sweep (Nov 28, 2026): next step FIRST. The
+              CaseCommandPanel (next step -> colour checklist -> payment)
+              now leads the main column, ahead of the order summary and
+              the new-application calculator, so a returning client sees
+              what to do next before anything else. */}
           <CaseCommandPanel
             role="client"
             route="inside_us"
@@ -138,6 +146,31 @@ export default function PortalPage() {
             canEditRoute={false}
             guide="client"
           />
+
+          {/* One-click actions: draft email (preview only), send status
+              update, open chat, open checklist. No real case id is
+              loaded in this example build, so the two write actions
+              honestly say they need an open case. */}
+          <OneClickActions caseLabel="Form I-130 — Family Petition (EXAMPLE)" />
+
+          {/* ADDITION 1 — Order, Invoice & Process Roadmap (above tracker) */}
+          <OrderSummary />
+          <ProcessRoadmap />
+          <FormsIncluded />
+
+          {/* Smart Guided Intake — start a NEW application. Prefer the
+              guided sequence? Start at /intake: Path Finder → fee
+              estimate → checklist preview (first 2 free) → register →
+              pay → case created. */}
+          <p className="text-sm">
+            <Link
+              href="/intake"
+              className="font-semibold text-blue-700 underline"
+            >
+              Guided intake — Path Finder → fee estimate → checklist preview → register → pay →
+            </Link>
+          </p>
+          <SmartIntakeCalculator />
 
           {/* Unified layer — what this tier includes, in plain English. */}
           <TierSummary tier="standard" serviceLabel="Family Adjustment Bundle (I-130 & I-485)" clientLanguage="es" />
@@ -211,8 +244,20 @@ export default function PortalPage() {
 
           {/* Your renewals — derived from REAL expiry dates only. No
               renewal dates are on file for the example case, so the
-              section shows its honest empty state. */}
+              section shows its honest empty state. The fuller Renewal
+              & Expiry Radar (advance parole + visa, 180/90/30/7-day
+              ladder, locked prep prices) lives on the Client Dashboard
+              home — see /client-dashboard. */}
           <RenewalsSection renewals={[]} />
+
+          {/* EXPERT FEATURES, INSIDE THE DASHBOARD (Nov 28, 2026):
+              the Fee Waiver Checker, Total Cost Estimator, and Vault
+              expiry warnings also live on the Client Dashboard home —
+              they are embedded here too so a client working in the
+              portal never has to hunt for them. */}
+          <FeeWaiverCheckerSection audience="client" />
+          <TotalCostEstimatorSection audience="client" />
+          <VaultExpirySection documents={[]} audience="client" />
 
           {/* Reviews — real rows only. No real reviews exist for the
               example case, so the honest empty state shows. The example
@@ -580,6 +625,13 @@ export default function PortalPage() {
             <div className="mt-3">
               <CaseChat />
             </div>
+            {/* Instant-answer chat — ask in the case chat, the system
+                answers right now from the locked guides (no waiting for
+                a person). Unknown / legal questions are flagged to the
+                professional in the unified thread below. */}
+            <div className="mt-3">
+              <InstantAnswerChat caseId="example-case-1" viewerRole="client" />
+            </div>
             <div className="mt-3">
               <UnifiedThread
                 caseId="example-case-1"
@@ -588,6 +640,11 @@ export default function PortalPage() {
                 viewerName="You (Example Client)"
                 clientLanguage="es"
               />
+            </div>
+            {/* Final sweep (Nov 28, 2026): notification inbox — every
+                stored status / email / message event in one place. */}
+            <div className="mt-3">
+              <NotificationInbox />
             </div>
           </section>
 

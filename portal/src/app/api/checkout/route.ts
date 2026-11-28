@@ -42,6 +42,11 @@ import {
   type LockedStripePrice,
 } from "@/lib/stripePrices";
 import { splitInvoices } from "@/lib/stripe";
+import {
+  DIY_FORM_CODES,
+  diyAlreadyPaidNotice,
+  getDiyUnlockForCase,
+} from "@/lib/diy";
 
 export const runtime = "nodejs";
 
@@ -137,6 +142,43 @@ export async function POST(req: Request) {
   }
   const single = prices.length === 1 ? prices[0] : null;
 
+  // --- Never charge twice for the same DIY unlock ------------------------
+  // A DIY checkout (diy_form $25 / diy_bundle $99) with a case id,
+  // account id AND form code is checked against the database first:
+  // when the unlock is already paid, refuse with 409 "Already paid"
+  // and create NO Checkout Session. When the payment records are not
+  // connected the check cannot verify anything, so it does not block
+  // the checkout — the DIY flow itself still shows the paid state
+  // once the records are connected (fail-open here only because
+  // Stripe, not the portal, collects the money; the packet/email
+  // gates in src/lib/diy.ts still fail closed).
+  if (
+    single &&
+    (single.key === "diy_form" || single.key === "diy_bundle") &&
+    caseId &&
+    accountId &&
+    typeof body.formCode === "string" &&
+    DIY_FORM_CODES.includes(body.formCode)
+  ) {
+    const unlock = await getDiyUnlockForCase(
+      accountId,
+      caseId,
+      body.formCode
+    );
+    if (unlock.configured && unlock.unlocked) {
+      return NextResponse.json(
+        {
+          error:
+            diyAlreadyPaidNotice(unlock) ??
+            "Already paid — this DIY unlock is already confirmed in our records. You will not be charged again.",
+          alreadyPaid: true,
+          unlockedBy: unlock.unlockedBy,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   // --- Validate the plan against the Price kind ---------------------------
   const requestedPlan: Plan =
     plan && PLANS.includes(plan) ? plan : single?.cycles ? `monthly_${single.cycles}` as Plan : "full";
@@ -196,6 +238,22 @@ export async function POST(req: Request) {
     plan: effectivePlan,
     total_cents: String(totalCents),
   };
+  // FIX (Nov 28, 2026): the webhook needs to know WHICH form a
+  // payment was for, so it can write invoices.form_code and the
+  // diy_unlocks row. Before this fix no form_code ever reached the
+  // webhook: body.formCode was only used for the already-paid
+  // check above. Record it here — a validated DIY registry code
+  // first, else the single Price's locked formCode (e.g. I-485).
+  // Never a client-invented string: the webhook re-validates it
+  // against the locked map before trusting it.
+  if (
+    typeof body.formCode === "string" &&
+    DIY_FORM_CODES.includes(body.formCode)
+  ) {
+    metadata.form_code = body.formCode;
+  } else if (single?.formCode) {
+    metadata.form_code = single.formCode;
+  }
   if (accountId) metadata.account_id = accountId;
   if (caseId) metadata.case_id = caseId;
   if (single?.cycles) {

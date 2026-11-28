@@ -27,17 +27,18 @@ import {
 //
 // Env names only — NO keys in code:
 //   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER,
-//   TWILIO_WHATSAPP_NUMBER, RESEND_API_KEY
-// Until those are set (and the Twilio/Resend SDKs are installed —
-// neither package is in package.json today), this route returns 501
-// and sends nothing. It NEVER claims a message was sent when it was not.
+//   TWILIO_WHATSAPP_NUMBER, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+// Email sends through the platform AWS SES sender (src/lib/email.ts).
+// Until SES is set, the email channel returns 501 and sends nothing.
+// SMS / WhatsApp are still logic-only (Twilio SDK not installed).
+// This route NEVER claims a message was sent when it was not.
 //
 // Corrections vs the pasted draft (do not re-introduce them):
 //  * Portal URL is https://immigration.niptei.com (NOT https://niptei.com).
-//  * Sender is NOT updates@niptei.com. The placeholder sender is
-//    notifications@immigration.niptei.com, labelled "needs verified
-//    Resend domain" (NOTIFICATION_SENDER.verified === false). The
-//    real contact in every footer is nipteiapp@gmail.com.
+//  * Sender is updates@niptei.com via AWS SES (platform sender,
+//    src/lib/email.ts) — UNVERIFIED until the niptei.com domain
+//    identity is verified in SES and the DKIM records are added in
+//    IONOS. The real contact in every footer is nipteiapp@gmail.com.
 //  * WhatsApp via Twilio needs WhatsApp Business approval — labelled
 //    below; approval is a separate step from having the env vars.
 //  * NO A-Numbers in messages. Any payload containing an A-Number
@@ -70,9 +71,13 @@ import {
 // policy for ordinary users, migration 0003), so the in-memory /
 // returned log is the expected path until a service-role sender is built.
 
+import { isEmailConfigured, sendEmail } from "@/lib/email";
+
 const SMS_ENVS = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"];
 const WHATSAPP_ENVS = [...SMS_ENVS, "TWILIO_WHATSAPP_NUMBER"];
-const EMAIL_ENVS = ["RESEND_API_KEY"];
+// SES region + sender have defaults (us-east-1 / updates@niptei.com),
+// so only the IAM credentials gate the email channel.
+const EMAIL_ENVS = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"];
 
 const IN_MEMORY_LOG: NotificationLogEntry[] = [];
 const MAX_MEMORY_LOG = 500;
@@ -285,15 +290,16 @@ export async function POST(req: Request) {
   const logPairs: { entry: NotificationLogEntry; recipient: NotifyRecipient }[] = [];
   const missingEnvSet = new Set<string>();
   let plannedCount = 0;
+  let sentCount = 0;
 
   for (const recipient of recipients) {
     const entriesBefore = log.length;
     const language = normalizeLanguage(recipient.language);
     const template = getNotificationTemplate(stage, language);
-    // Rendered here so a future sender can use the exact strings;
-    // the rendered text is NOT logged and NOT returned (PII).
-    void renderTemplateText(template.emailSubject, { ...vars, name: recipient.name });
-    void renderTemplateText(template.emailBody, { ...vars, name: recipient.name });
+    // Rendered here for the actual send; the rendered text is NOT
+    // logged and NOT returned (PII).
+    const emailSubject = renderTemplateText(template.emailSubject, { ...vars, name: recipient.name });
+    const emailBody = renderTemplateText(template.emailBody, { ...vars, name: recipient.name });
     void renderTemplateText(template.smsText, { ...vars, name: recipient.name });
 
     const { channels, skipped } = resolveChannels({
@@ -316,6 +322,68 @@ export async function POST(req: Request) {
     }
     for (const channel of channels) {
       plannedCount += 1;
+      if (channel === "email") {
+        // Email is the one live channel: platform AWS SES.
+        if (!recipient.email) {
+          log.push({
+            recipientRole: recipient.role ?? "primary_client",
+            recipient: recipientLabel(recipient),
+            language,
+            channel,
+            stage,
+            status: "skipped_no_contact",
+            reason: "No email address on file. Nothing was sent.",
+            attemptedAt: new Date().toISOString(),
+          });
+          continue;
+        }
+        if (!isEmailConfigured()) {
+          for (const m of EMAIL_ENVS) {
+            if (!process.env[m]) missingEnvSet.add(m);
+          }
+          log.push({
+            recipientRole: recipient.role ?? "primary_client",
+            recipient: recipientLabel(recipient),
+            language,
+            channel,
+            stage,
+            status: "not_configured",
+            reason: "Email not configured — AWS SES is not connected. Nothing was sent.",
+            attemptedAt: new Date().toISOString(),
+          });
+          continue;
+        }
+        const result = await sendEmail({
+          to: recipient.email,
+          subject: emailSubject,
+          text: emailBody,
+        });
+        if (result.ok) {
+          sentCount += 1;
+          log.push({
+            recipientRole: recipient.role ?? "primary_client",
+            recipient: recipientLabel(recipient),
+            language,
+            channel,
+            stage,
+            status: "sent",
+            reason: "Email sent via AWS SES.",
+            attemptedAt: new Date().toISOString(),
+          });
+        } else {
+          log.push({
+            recipientRole: recipient.role ?? "primary_client",
+            recipient: recipientLabel(recipient),
+            language,
+            channel,
+            stage,
+            status: "failed",
+            reason: result.error,
+            attemptedAt: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
       const { configured, missing } = channelConfigured(channel);
       for (const m of missing) missingEnvSet.add(m);
       log.push({
@@ -326,7 +394,7 @@ export async function POST(req: Request) {
         stage,
         status: configured ? "not_implemented" : "not_configured",
         reason: configured
-          ? `${channel} provider is configured but the sender is not implemented yet — Twilio/Resend SDKs are not installed, so nothing was sent.`
+          ? `${channel} provider is configured but the sender is not implemented yet — Twilio SDK is not installed, so nothing was sent.`
           : `${channel} not configured — missing env: ${missing.join(", ")}. Nothing was sent.`,
         attemptedAt: new Date().toISOString(),
       });
@@ -348,14 +416,19 @@ export async function POST(req: Request) {
       : "memory";
 
   const missingEnv = Array.from(missingEnvSet);
+  const sent = sentCount > 0;
   return NextResponse.json(
     {
-      error:
-        missingEnv.length > 0
-          ? "Notification sending not configured — Twilio + Resend are not connected. Nothing was sent."
-          : "Notification senders not implemented — Twilio/Resend SDKs are not installed. Nothing was sent.",
-      sent: false,
-      sentCount: 0,
+      ...(sent
+        ? { ok: true }
+        : {
+            error:
+              missingEnv.length > 0
+                ? "Notification sending not configured — Twilio + AWS SES are not connected. Nothing was sent."
+                : "Notification senders not implemented — Twilio SDK is not installed and no email was sent. Nothing was sent.",
+          }),
+      sent,
+      sentCount,
       plannedCount,
       stage,
       stageNumber: STAGE_NUMBERS[stage],
@@ -377,6 +450,6 @@ export async function POST(req: Request) {
       logNote:
         "Attempts are written to notification_logs (migration 0010, when applied and the insert succeeds), else audit_log, else the in-memory log returned here. notification_logs only accepts status sent/failed/not_configured and has no message-body column; skipped / not-implemented entries fall through to audit_log / memory. No message bodies are logged.",
     },
-    { status: 501 }
+    { status: sent ? 200 : 501 }
   );
 }

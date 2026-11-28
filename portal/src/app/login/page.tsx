@@ -20,7 +20,7 @@
 //     self-registration.
 //
 // The code itself is NEVER stored (only its SHA-256 hash, in
-// login_codes) and NEVER returned in a response. Until Resend is
+// login_codes) and NEVER returned in a response. Until AWS SES is
 // connected the code cannot be emailed and login stops honestly at
 // step 1 with "email_not_configured".
 //
@@ -75,7 +75,7 @@ export default function LoginPage() {
   // Step 1 (email login): check the password with the server and have
   // it issue the 6-digit email code. The API verifies the password
   // against Supabase Auth and DISCARDS the session — no login exists
-  // until step 2. The code is emailed by Resend; if Resend is not
+  // until step 2. The code is emailed by AWS SES; if SES is not
   // connected the API answers 501 "email_not_configured" and this
   // page says so honestly instead of pretending a code was sent.
   // (The Supabase OTP flow — signInWithOtp / verifyOtp — was removed
@@ -108,7 +108,7 @@ export default function LoginPage() {
       if (!response.ok) {
         if (response.status === 501) {
           setError(
-            "Email codes are not configured yet (Resend is not connected) — your code cannot be sent. Try again once email sending is set up."
+            "Email codes are not configured yet (AWS SES is not connected) — your code cannot be sent. Try again once email sending is set up."
           );
         } else {
           setError(body.error ?? body.message ?? "Email or password not recognised. Try again.");

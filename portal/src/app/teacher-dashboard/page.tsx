@@ -29,6 +29,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import LanguagePicker from "@/components/LanguagePicker";
+import RoleCheatsheet from "@/components/cheatsheets/RoleCheatsheet";
+import DashboardTop from "@/components/nextstep/DashboardTop";
 import { getSupabase } from "@/lib/supabase";
 
 type StudentRow = {
@@ -163,6 +165,17 @@ export default function TeacherDashboardPage() {
         <LanguagePicker />
       </header>
 
+      {/* Final sweep (Nov 28, 2026): next step first, then checklist,
+          one-click actions, deadline countdown, notification inbox.
+          Teachers confirm students, never cases, so the next step
+          honestly says no case route is set and the checklist shows
+          its empty state until a case is assigned through a student. */}
+      <div className="mb-6">
+        <DashboardTop
+          nextStepInput={{ route: null, uscisStage: null, blockingItems: [], language: "en" }}
+        />
+      </div>
+
       {!supabaseLive && (
         <p className="mb-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           Example data — not live. Supabase is not connected in this build,
@@ -170,6 +183,10 @@ export default function TeacherDashboardPage() {
           the list is empty until the portal is wired to Supabase.
         </p>
       )}
+
+      <div className="mb-6">
+        <RoleCheatsheet role="teacher" compact />
+      </div>
 
       <section
         aria-label="Your approval status"
@@ -322,6 +339,42 @@ export default function TeacherDashboardPage() {
           </section>
         </>
       )}
+
+      {/* EXPERT FEATURES, INSIDE THE DASHBOARDS (Nov 28, 2026): a
+          teacher owns no case pipeline — students see a case only
+          through an assignment by the case's verified attorney or DOJ
+          provider — so the renewal radar, fee-waiver checker, cost
+          estimator, and vault warnings live on the dashboards of the
+          roles that own cases. This section is on this dashboard so a
+          teacher never has to hunt for them. */}
+      <section
+        aria-label="Case tools for your students"
+        className="mb-8 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+      >
+        <h2 className="text-base font-semibold">Case tools for your students</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          You confirm students — you do not see their cases. The expert
+          tools your students use on their assigned cases live on their
+          dashboard: the Renewal &amp; Expiry Radar (180/90/30/7-day
+          reminders), the Total Cost Estimator (our fee and the USCIS
+          fee, shown separately), and Document Vault expiry warnings.
+          The Fee Waiver Checker (Form I-912) lives on the client and
+          professional dashboards — it never decides eligibility, and
+          only a licensed attorney or DOJ-accredited representative
+          confirms a &ldquo;may qualify&rdquo; result.
+        </p>
+        <p className="mt-3 text-sm">
+          <Link href="/student-dashboard" className="font-semibold text-blue-700 underline">
+            Law Student Dashboard →
+          </Link>{" "}
+          <Link href="/attorney-dashboard" className="font-semibold text-blue-700 underline">
+            Attorney Dashboard →
+          </Link>{" "}
+          <Link href="/client-dashboard" className="font-semibold text-blue-700 underline">
+            Client Dashboard →
+          </Link>
+        </p>
+      </section>
 
       <p className="rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
         Immigration with NIPTEI is not a law firm and is not affiliated with

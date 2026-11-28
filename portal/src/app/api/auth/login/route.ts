@@ -13,14 +13,15 @@
 //     email code is verified too — code every login, no exceptions.
 //
 // Then a login_codes row is written (SHA-256 hash only, never the
-// plaintext code) and the code is emailed via Resend. If Resend is
-// not connected (RESEND_API_KEY not set) this route returns 501
-// email_not_configured: the password/OAuth check may have passed, but
-// no code could be delivered and NO session was created. The code is
-// NEVER returned in a response.
+// plaintext code) and the code is emailed via AWS SES (platform
+// sender — see src/lib/email.ts). If SES is not connected
+// (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set) this route
+// returns 501 email_not_configured: the password/OAuth check may
+// have passed, but no code could be delivered and NO session was
+// created. The code is NEVER returned in a response.
 //
 // SKELETON / NOT LIVE until env vars are set + migration 0020 has run
-// + Resend is connected. No keys in code; values come from Vercel /
+// + AWS SES is connected. No keys in code; values come from Vercel /
 // .env.local.
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -30,6 +31,13 @@ import {
   hashLoginCode,
   loginCodeExpiresAt,
 } from "@/lib/loginCodes";
+import { isEmailConfigured, sendEmail } from "@/lib/email";
+import {
+  checkRateLimit,
+  LOGIN_CODE_REQUEST_LIMIT,
+  rateLimitKey,
+  rateLimitResponse,
+} from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -43,48 +51,19 @@ async function sendCodeEmail(args: {
   to: string;
   code: string;
 }): Promise<{ sent: boolean; detail: string }> {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    return {
-      sent: false,
-      detail:
-        "Email sending is not connected (RESEND_API_KEY is not set), so no code was emailed.",
-    };
+  const result = await sendEmail({
+    to: args.to,
+    subject: `Your Immigration with NIPTEI login code: ${args.code}`,
+    text:
+      `Your login code is ${args.code}.\n\n` +
+      `It expires in ${LOGIN_CODE_TTL_MINUTES} minutes and can be used once. ` +
+      `If you did not try to log in, ignore this email — no one can log in without the code.\n\n` +
+      `Immigration with NIPTEI — https://immigration.niptei.com`,
+  });
+  if (!result.ok) {
+    return { sent: false, detail: `${result.error} No code was delivered.` };
   }
-  const from =
-    process.env.RESEND_FROM_EMAIL ??
-    "Immigration with NIPTEI <updates@niptei.com>";
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [args.to],
-        subject: `Your Immigration with NIPTEI login code: ${args.code}`,
-        text:
-          `Your login code is ${args.code}.\n\n` +
-          `It expires in ${LOGIN_CODE_TTL_MINUTES} minutes and can be used once. ` +
-          `If you did not try to log in, ignore this email — no one can log in without the code.\n\n` +
-          `Immigration with NIPTEI — https://immigration.niptei.com`,
-      }),
-    });
-    if (!res.ok) {
-      return {
-        sent: false,
-        detail: `Resend refused the email (HTTP ${res.status}). No code was delivered.`,
-      };
-    }
-    return { sent: true, detail: "Code emailed." };
-  } catch {
-    return {
-      sent: false,
-      detail: "Could not reach Resend. No code was delivered.",
-    };
-  }
+  return { sent: true, detail: "Code emailed." };
 }
 
 export async function POST(req: Request) {
@@ -106,6 +85,22 @@ export async function POST(req: Request) {
     body = (await req.json()) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  // Login-code requests are the credential-stuffing target: 5/minute
+  // per IP + email, honest 429. This sits in front of the password /
+  // OAuth check so a bot cannot burn SES sends or probe accounts.
+  // The email is lower-cased for the bucket key only; it is never
+  // logged or stored by the limiter.
+  const loginEmail =
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const loginLimited = checkRateLimit(
+    rateLimitKey("auth-login", req, loginEmail || undefined),
+    LOGIN_CODE_REQUEST_LIMIT.limit,
+    LOGIN_CODE_REQUEST_LIMIT.windowMs
+  );
+  if (!loginLimited.allowed) {
+    return rateLimitResponse(loginLimited.retryAfterSeconds, "login-code requests");
   }
 
   const email = asString(body.email);
@@ -209,7 +204,7 @@ export async function POST(req: Request) {
           emailResult.detail +
           " No session was created.",
         stage: "code",
-        emailNotConfigured: !process.env.RESEND_API_KEY,
+        emailNotConfigured: !isEmailConfigured(),
       },
       { status: 501 }
     );

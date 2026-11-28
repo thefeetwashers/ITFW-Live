@@ -26,11 +26,12 @@
 //     It flips to true ONLY via /api/stripe/webhook once the subscription is
 //     active AND verification is approved — the webhook is still a 501
 //     skeleton until Stripe is live, so nothing is listed by this route.
-//   * Law-student supervisor confirmation email: email sending is NOT
-//     connected (Resend not configured), so the email is QUEUED, never
-//     claimed as sent. student_profiles.confirmation_status stays
-//     'pending' until the supervisor confirms (future confirmation link
-//     or /admin/verifications).
+//   * Law-student supervisor confirmation email: sent via the platform
+//     AWS SES sender (src/lib/email.ts) when SES is connected; when
+//     it is not, the email is QUEUED, never claimed as sent.
+//     student_profiles.confirmation_status stays 'pending' until the
+//     supervisor confirms (future confirmation link or
+//     /admin/verifications).
 //   * Paid roles 2–5 route to Stripe Checkout with the exact LOCKED
 //     Price ID (src/lib/stripePrices.ts, created Nov 24, 2026).
 //     /api/checkout creates the Checkout Session — this route does not
@@ -40,6 +41,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getLockedPriceByKey } from "@/lib/stripePrices";
+import { isEmailConfigured, sendEmail } from "@/lib/email";
 //   * Password: 12+ characters, enforced here and by the live strength
 //     meter on the register form.
 
@@ -396,6 +398,51 @@ export async function POST(req: Request) {
       : SUBSCRIPTION_PLAN[role];
   const stripeConfigured = Boolean(process.env.STRIPE_SECRET_KEY && lockedPrice);
 
+  // Law-student supervisor confirmation email — platform AWS SES.
+  // Sent only when SES is connected; otherwise queued, never claimed.
+  let supervisorConfirmationEmail: {
+    sent: boolean;
+    status: "sent" | "queued_not_sent" | "failed";
+    to: string;
+    detail: string;
+  } | null = null;
+  if (role === "student") {
+    if (!isEmailConfigured()) {
+      supervisorConfirmationEmail = {
+        sent: false,
+        status: "queued_not_sent",
+        to: supervisorEmail,
+        detail:
+          "Email sending is not connected (AWS SES not configured), so no confirmation email was sent. The supervisor confirmation stays pending (student_profiles.confirmation_status = 'pending') until the supervisor confirms via the future 1-click link or /admin/verifications. Never treat this as sent.",
+      };
+    } else {
+      const result = await sendEmail({
+        to: supervisorEmail,
+        subject: "Immigration with NIPTEI — please confirm your law student",
+        text:
+          `Hello ${supervisorName},\n\n` +
+          `${fullName} registered on Immigration with NIPTEI as a law student and named you as their supervising attorney / clinic director.\n\n` +
+          `Please confirm that you supervise this student. Until you confirm, the student cannot take on cases. ` +
+          `You can confirm in the Founder/Admin verification queue, or reply to this email.\n\n` +
+          `Immigration with NIPTEI — https://immigration.niptei.com`,
+      });
+      supervisorConfirmationEmail = result.ok
+        ? {
+            sent: true,
+            status: "sent",
+            to: supervisorEmail,
+            detail:
+              "Confirmation email sent to the supervisor via AWS SES. The supervisor confirmation stays pending (student_profiles.confirmation_status = 'pending') until the supervisor confirms.",
+          }
+        : {
+            sent: false,
+            status: "failed",
+            to: supervisorEmail,
+            detail: `Confirmation email could not be sent. ${result.error} The supervisor confirmation stays pending (student_profiles.confirmation_status = 'pending'). Never treat this as sent.`,
+          };
+    }
+  }
+
   return NextResponse.json(
     {
       ok: true,
@@ -416,16 +463,8 @@ export async function POST(req: Request) {
           ? "Stripe is configured — POST /api/checkout with this Price ID to start a Checkout Session (subscription mode). Nothing is charged until checkout completes, and your directory listing stays off until the Stripe webhook confirms an active subscription AND verification is approved."
           : "Stripe is not connected — STRIPE_SECRET_KEY is not set, so /api/checkout returns 501 and no checkout session was created. Nothing was charged. Your directory listing (is_published) stays off until the Stripe webhook confirms an active subscription AND verification is approved.",
       },
-      ...(role === "student"
-        ? {
-            supervisorConfirmationEmail: {
-              sent: false,
-              status: "queued_not_sent",
-              to: supervisorEmail,
-              detail:
-                "Email sending is not connected (Resend not configured), so no confirmation email was sent. The supervisor confirmation stays pending (student_profiles.confirmation_status = 'pending') until the supervisor confirms via the future 1-click link or /admin/verifications. Never treat this as sent.",
-            },
-          }
+      ...(role === "student" && supervisorConfirmationEmail
+        ? { supervisorConfirmationEmail }
         : {}),
     },
     { status: 201 }

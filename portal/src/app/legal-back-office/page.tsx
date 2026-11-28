@@ -10,6 +10,7 @@ import PermissionsPanel from "@/components/comms/PermissionsPanel";
 import ByoSettings from "@/components/comms/ByoSettings";
 import AskNipteiByoSettings from "@/components/copilot/AskNipteiByoSettings";
 import AskNipteiChat from "@/components/copilot/AskNipteiChat";
+import RoleCheatsheet from "@/components/cheatsheets/RoleCheatsheet";
 import CaseCommandPanel from "@/components/nextstep/CaseCommandPanel";
 
 // ---------------------------------------------------------------------------
@@ -278,6 +279,14 @@ export default function LegalBackOfficePage() {
                 Role: <strong>{ROLE_LABELS[role]}</strong> · Plan: <strong>{plan}</strong> · Status:{" "}
                 <strong>{verified ? "Verified" : "Pending verification"}</strong>
               </p>
+
+              {/* Start here — cheatsheet for this role (attorney / DOJ /
+                  law student, from the demo role switcher above). First
+                  5 things to do, in order. */}
+              <RoleCheatsheet
+                role={role === "attorney" ? "attorney" : role === "nonprofit" ? "doj" : "law_student"}
+                compact
+              />
 
               {/* Unified layer — one thread per case + what you can do + BYO. */}
               <div className="mt-4 space-y-4">

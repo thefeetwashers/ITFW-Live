@@ -3,3 +3,18 @@
 @tailwind utilities;
 
 body { @apply bg-slate-50 text-slate-900 antialiased; }
+
+/* Printable guides (Safety hub, Nov 28, 2026): printing shows only
+ * the guide itself. Buttons, navigation, and the Quick Exit control
+ * carry .no-print; the guide carries .print-area. No PDF generator
+ * is used — the browser's own print does the work. */
+@media print {
+  .no-print { display: none !important; }
+  body { background: #ffffff; }
+  .print-area {
+    position: static;
+    max-width: none;
+    color: #000000;
+  }
+  .print-area a { color: #000000; text-decoration: none; }
+}

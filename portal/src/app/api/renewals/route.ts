@@ -4,10 +4,15 @@
 //      Rows exist only when a real expiry/eligibility date was entered.
 // POST — add a renewal row: { caseId, renewalType, eligibilityOrExpiryDate,
 //      formToFile?, nudgeLanguage? }. Types are the widened set from
-//      migration 0017: ead, green_card (I-90), conditional_green_card
-//      (I-751), tps, passport, n400.
+//      migration 0017 plus migration 0029 (advance_parole, visa):
+//      ead, green_card (I-90), conditional_green_card (I-751), tps,
+//      passport, advance_parole (I-131 renewal), visa, n400.
+//      The 180/90/30/7-day reminder ladder is derived in
+//      src/lib/renewals.ts (renewalReminderRungs); sending a due
+//      reminder is POST /api/renewals/remind (honest 501 until SES is
+//      connected — see src/lib/renewalReminders.ts).
 // Nudges are QUEUED only (48h, in the client's language, via
-// reminder_nudges + /api/reminders): Twilio/Resend are NOT connected,
+// reminder_nudges + /api/reminders): Twilio/AWS SES are NOT connected,
 // so nothing is ever claimed sent.
 // Until Supabase env vars are set this route returns 501.
 import { NextResponse } from "next/server";
@@ -26,6 +31,8 @@ const RENEWAL_TYPES: RenewalType[] = [
   "conditional_green_card",
   "tps",
   "passport",
+  "advance_parole",
+  "visa",
   "n400",
 ];
 

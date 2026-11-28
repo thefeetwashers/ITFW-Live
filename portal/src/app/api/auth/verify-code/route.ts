@@ -31,6 +31,12 @@ import {
   redirectAfterLogin,
   type LoginCodeRow,
 } from "@/lib/loginCodes";
+import {
+  checkRateLimit,
+  LOGIN_CODE_VERIFY_LIMIT,
+  rateLimitKey,
+  rateLimitResponse,
+} from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -63,6 +69,19 @@ export async function POST(req: Request) {
   const code = asString(body.code);
   const password = typeof body.password === "string" ? body.password : "";
   const oauthAccessToken = asString(body.oauthAccessToken);
+  // In-memory per-IP + email throttle in front of the code check:
+  // 5 attempts/minute. This is in ADDITION to the per-code lock in
+  // the login_codes table (3 wrong codes lock the code 15 minutes) —
+  // the table lock stops guessing one code, this stops hammering the
+  // endpoint across many codes. Honest 429, never a fake success.
+  const verifyLimited = checkRateLimit(
+    rateLimitKey("auth-verify-code", req, email.toLowerCase() || undefined),
+    LOGIN_CODE_VERIFY_LIMIT.limit,
+    LOGIN_CODE_VERIFY_LIMIT.windowMs
+  );
+  if (!verifyLimited.allowed) {
+    return rateLimitResponse(verifyLimited.retryAfterSeconds, "code verifications");
+  }
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
   }

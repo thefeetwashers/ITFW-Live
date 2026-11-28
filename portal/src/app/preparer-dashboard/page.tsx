@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import PreparerDashboard from "@/components/preparer/PreparerDashboard";
+import RoleCheatsheet from "@/components/cheatsheets/RoleCheatsheet";
 import { getSupabase } from "@/lib/supabase";
 
 export const metadata: Metadata = {
@@ -50,6 +51,10 @@ export default function PreparerDashboardPage() {
           example until live case data is wired in.
         </p>
       )}
+
+      <div className="mt-6">
+        <RoleCheatsheet role="preparer" compact />
+      </div>
 
       <div className="mt-6">
         <PreparerDashboard />

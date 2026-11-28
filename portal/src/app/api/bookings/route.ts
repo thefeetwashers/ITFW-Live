@@ -21,6 +21,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import { bookingPriceCents, type ConsultationMode, type TimePreference } from "@/lib/booking";
+import { resolveVideoMeeting } from "@/lib/expertTools";
 
 function notConfigured() {
   return NextResponse.json(
@@ -136,6 +137,22 @@ export async function PATCH(req: Request) {
       { status: 400 }
     );
   }
+  // Video link (migration 0033): the professional's own pasted link
+  // only. Google Meet is NOT connected, so no Meet link is ever
+  // generated here — resolveVideoMeeting() validates the paste and
+  // refuses anything that is not a valid https URL.
+  let videoLinkPatch: { video_link: string; video_link_source: "manual" } | {} = {};
+  if (typeof body.manualVideoLink === "string" && body.manualVideoLink.trim()) {
+    const resolved = resolveVideoMeeting({
+      googleCalendarConnected: false,
+      googleMeetLinkFromEvent: null,
+      manualLink: body.manualVideoLink as string,
+    });
+    if (resolved.source !== "manual" || !resolved.link) {
+      return NextResponse.json({ error: resolved.note }, { status: 400 });
+    }
+    videoLinkPatch = { video_link: resolved.link, video_link_source: "manual" };
+  }
   const { error } = await admin
     .from("preparer_appointments")
     .update({
@@ -143,6 +160,7 @@ export async function PATCH(req: Request) {
       proposed_time: decision === "proposed" ? (body.proposedTime as string) : null,
       declined_reason: decision === "declined" && typeof body.declinedReason === "string" ? body.declinedReason : null,
       status: decision === "accepted" ? "confirmed_by_preparer" : decision === "declined" ? "cancelled" : "request_collected",
+      ...videoLinkPatch,
     })
     .eq("id", id);
   if (error) {

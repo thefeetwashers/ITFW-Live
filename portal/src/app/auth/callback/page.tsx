@@ -19,7 +19,7 @@
 //     completed via /api/google-profile. No role is auto-assigned.
 //   * Lookup itself fails → show the choice honestly instead of
 //     guessing: the user picks "Continue onboarding" or "Log in".
-//   * The code cannot be emailed yet (Resend not connected) → the
+//   * The code cannot be emailed yet (AWS SES not connected) → the
 //     API answers 501 and this page says so honestly.
 //
 // The Google token is NEVER logged and the user's Google email is
@@ -137,7 +137,7 @@ export default function AuthCallbackPage() {
               kind: "error",
               message:
                 loginRes.status === 501
-                  ? "Email codes are not configured yet (Resend is not connected) — your login code cannot be sent. Try again once email sending is set up."
+                  ? "Email codes are not configured yet (AWS SES is not connected) — your login code cannot be sent. Try again once email sending is set up."
                   : "Google sign-in worked, but your login code could not be sent. Please try signing in again from the Login page.",
             });
           return;

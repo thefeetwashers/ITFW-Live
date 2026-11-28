@@ -23,7 +23,7 @@ import CaseCommandPanel from "@/components/nextstep/CaseCommandPanel";
 // compliance / team. Center: client + case tools. Right rail: always-visible
 // Omni-Channel Communication Hub.
 // HONEST LABELLING (read before believing anything on this page):
-//   * SMS / WhatsApp / Email are NOT live — Twilio / Resend are NOT
+//   * SMS / WhatsApp / Email are NOT live — Twilio / AWS SES are NOT
 //     connected, no keys exist. The hub is a unified thread UI + queue only.
 //     Every send attempt returns "not configured" and NEVER claims a message
 //     was sent. Messages go through the Twilio number (placeholder until
@@ -145,7 +145,7 @@ export default function CompanyBackOfficePage() {
     setQueue((q) => [...q, { id: q.length + 1, channel, body, status: "queued_not_sent" }]);
     setDraft("");
     setHubNotice(
-      `${channel}: NOT CONFIGURED — Twilio / Resend are not connected, so nothing was sent. The message is queued only (see queue below). Messages go through the Twilio number (placeholder until set), never the founder's personal number.`
+      `${channel}: NOT CONFIGURED — Twilio / AWS SES are not connected, so nothing was sent. The message is queued only (see queue below). Messages go through the Twilio number (placeholder until set), never the founder's personal number.`
     );
   };
 
@@ -193,7 +193,7 @@ export default function CompanyBackOfficePage() {
 
       <p className="mt-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
         Example data — not live{!isLive ? ". Supabase is not connected in this build" : ""}. SMS /
-        WhatsApp / Email are NOT live (Twilio / Resend not connected), video calls are NOT built,
+        WhatsApp / Email are NOT live (Twilio / AWS SES not connected), video calls are NOT built,
         and the E-Sign provider is NOT connected. Nothing on this page sends, charges, or files
         anything.
       </p>
@@ -564,8 +564,11 @@ export default function CompanyBackOfficePage() {
                 assembler are SKELETONS (official USCIS PDF templates NOT included; output is a DRAFT
                 for review, never auto-filed). OCR is not available until the library is pinned:
                 no OCR library is loaded in this build, and no unpinned CDN is loaded — see
-                DEPLOY.md §13. Do not add a Tesseract (or any OCR) CDN script without a pinned
-                version + SRI integrity hash.
+                DEPLOY.md §13 and src/lib/expertTools.ts OCR_STATUS. Pinning the npm package
+                alone would not pin what runs: tesseract.js downloads its worker script and
+                trained language data from a CDN at runtime by default. Do not add a Tesseract
+                (or any OCR) CDN script without a pinned version + SRI integrity hash, and do
+                not install the package until the worker + traineddata are self-hosted.
               </p>
               <ul className="mt-3 space-y-2 text-sm">
                 {vaultDocs.map((d) => (
@@ -697,7 +700,7 @@ export default function CompanyBackOfficePage() {
         <aside aria-label="Omni-channel communication hub" className="h-fit rounded border border-slate-300 bg-white p-4 xl:sticky xl:top-4">
           <h2 className="text-lg font-bold">Communication Hub</h2>
           <p className="mt-1 text-xs text-slate-600">
-            Unified thread UI + queue only. SMS / WhatsApp / Email are NOT live — Twilio / Resend
+            Unified thread UI + queue only. SMS / WhatsApp / Email are NOT live — Twilio / AWS SES
             are NOT connected. Nothing sent from here is ever claimed as sent.
           </p>
           <div className="mt-3 flex flex-wrap gap-1" role="tablist" aria-label="Channel">
@@ -719,7 +722,7 @@ export default function CompanyBackOfficePage() {
           </div>
           {(channel === "SMS" || channel === "WhatsApp" || channel === "Email") && (
             <p className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
-              {channel} NOT configured — Twilio / Resend not connected. Messages queue only.
+              {channel} NOT configured — Twilio / AWS SES not connected. Messages queue only.
             </p>
           )}
           <label className="mt-3 flex items-center justify-between gap-2 text-sm">
