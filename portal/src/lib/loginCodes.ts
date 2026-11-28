@@ -8,10 +8,10 @@
 //   * Founder/Admin get a code EVERY time — same as everyone else.
 //   * The code itself is NEVER stored: only its SHA-256 hash
 //     (login_codes.code_hash). A database read leaks no usable code.
-//   * Codes are SENT by email (Resend, RESEND_API_KEY — NOT connected
-//     yet). Until email is connected the login route returns 501
-//     email_not_configured and no session is created. The code is NEVER
-//     returned in an API response.
+//   * Codes are SENT by email (platform AWS SES, src/lib/email.ts —
+//     NOT connected yet). Until email is connected the login route
+//     returns 501 email_not_configured and no session is created.
+//     The code is NEVER returned in an API response.
 //
 // This file is SERVER-ONLY (API routes). It imports node:crypto, so no
 // client component may import it — the login page gets its redirect

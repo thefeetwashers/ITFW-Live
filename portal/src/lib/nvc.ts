@@ -9,7 +9,7 @@
 //
 // NVC case number format (13 characters):
 //   3-letter post code + 4-digit year + 3-digit Julian day + 3-digit sequence
-//   e.g. PHP2026514009 = PHP + 2026 + 514 + 009
+//   e.g. PHP2026144009 = PHP + 2026 + 144 + 009
 // USCIS receipt format (13 characters):
 //   3-letter service-center prefix + 10 digits, e.g. IOE0928374651 (EXAMPLE)
 import { CEAC_LOGIN_URL } from "./agency";
@@ -97,7 +97,7 @@ export function parseNvcCaseNumber(value: string): NvcCaseParse {
   const match = NVC_CASE_RE.exec(normalized);
   if (!match) {
     result.errors.push(
-      "Format must be 3 letters, then 4 digits (year), 3 digits (Julian day), 3 digits (sequence) — e.g. PHP2026514009 (EXAMPLE)."
+      "Format must be 3 letters, then 4 digits (year), 3 digits (Julian day), 3 digits (sequence) — e.g. PHP2026144009 (EXAMPLE)."
     );
     return result;
   }
@@ -280,7 +280,7 @@ export function ceacFeeTotalUsd(
 
 // ---------------------------------------------------------------------------
 // EXAMPLE NVC case only — every name / number here is EXAMPLE.
-// PHP2026514009 (Port-au-Prince), Invoice ID 42117188, Carlos & Elena
+// PHP2026144009 (Port-au-Prince), Invoice ID 42117188, Carlos & Elena
 // Mendez — none of these is a real case.
 // ---------------------------------------------------------------------------
 export interface ExampleNvcCase {
@@ -294,7 +294,7 @@ export interface ExampleNvcCase {
 }
 
 export const EXAMPLE_NVC_CASE: ExampleNvcCase = {
-  caseNumber: "PHP2026514009",
+  caseNumber: "PHP2026144009",
   invoiceId: "42117188",
   petitionerExample: "Elena Mendez",
   beneficiaryExample: "Carlos Mendez",

@@ -1,7 +1,7 @@
 // Notification call-site helper — posts stage-advance / agency-number
 // events to POST /api/notify-stage. LOGIC + CLIENT ONLY. Nothing is
 // actually sent by this file: the route returns 501 until Twilio +
-// Resend are connected (see src/app/api/notify-stage/route.ts).
+// AWS SES is connected (see src/app/api/notify-stage/route.ts).
 //
 // Reuses the repo's existing patterns:
 //  * LanguageCode from src/lib/i18n.ts (7 languages, accounts.preferred_language).
@@ -247,7 +247,7 @@ export function planNotificationLog(
         channel,
         stage: req.stage,
         status: "not_configured",
-        reason: "Planned — Twilio/Resend not connected; nothing sent.",
+        reason: "Planned — Twilio/AWS SES not connected; nothing sent.",
         attemptedAt: now,
       });
     }
@@ -361,4 +361,68 @@ export async function notifyAgencyNumberAdded(
   const stage: NotificationStageKey =
     args.agency === "USCIS" ? "at_uscis" : "nvc_processing";
   return notifyStage({ ...args, stage, trigger: "agency_number_added" }, baseUrl);
+}
+
+// ---------------------------------------------------------------------------
+// Case-status sync — one call, one status update (src/lib/caseStatusSync.ts,
+// POST /api/case-status). The professional enters the status once; the
+// route writes it to cases + case_lifecycle, links it to the client
+// account, and sends it automatically (SES email + in-app thread),
+// recording delivery per channel. A manually-entered status is never a
+// live USCIS lookup. Never throws — returns ok:false on failure.
+// ---------------------------------------------------------------------------
+import type {
+  CaseStatusUpdateInput,
+  CaseStatusSyncResponse,
+} from "./caseStatusSync";
+
+export async function syncCaseStatusUpdate(
+  input: CaseStatusUpdateInput,
+  baseUrl = ""
+): Promise<CaseStatusSyncResponse> {
+  try {
+    const res = await fetch(`${baseUrl}/api/case-status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = (await res.json()) as Partial<CaseStatusSyncResponse>;
+    return {
+      ok: res.ok && (data.ok ?? false),
+      caseId: data.caseId ?? input.caseId,
+      clientId: data.clientId ?? null,
+      caseStatus: data.caseStatus ?? null,
+      lifecycleStage: data.lifecycleStage ?? null,
+      stage5SubStage: data.stage5SubStage ?? null,
+      deliveries: data.deliveries ?? [],
+      stored: data.stored ?? {
+        caseUpdated: false,
+        lifecycleRow: false,
+        receiptRecorded: false,
+        inAppMessage: false,
+        emailLog: false,
+      },
+      warnings: data.warnings ?? [],
+      error: data.error,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      caseId: input.caseId,
+      clientId: null,
+      caseStatus: null,
+      lifecycleStage: null,
+      stage5SubStage: null,
+      deliveries: [],
+      stored: {
+        caseUpdated: false,
+        lifecycleRow: false,
+        receiptRecorded: false,
+        inAppMessage: false,
+        emailLog: false,
+      },
+      warnings: [],
+      error: err instanceof Error ? err.message : "Case-status sync call failed.",
+    };
+  }
 }

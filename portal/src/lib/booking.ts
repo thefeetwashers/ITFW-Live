@@ -53,7 +53,7 @@ export function bookingPriceCents(lengthMinutes: 15 | 30): number {
 // For consular (NVC) cases only. Every date is entered by the
 // professional/client or left blank — NO appointment date is invented.
 // Reminders 24h + 1h are QUEUED in appointment_reminders (migration
-// 0014), never claimed sent (Twilio/Resend NOT connected).
+// 0014), never claimed sent (Twilio/AWS SES NOT connected).
 export interface InterviewMedicalAppointment {
   id: string;
   caseId: string;

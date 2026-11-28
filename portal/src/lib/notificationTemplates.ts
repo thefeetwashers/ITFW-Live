@@ -3,9 +3,12 @@
 //
 // CORRECTIONS vs the pasted draft (do not re-introduce them):
 //  * Portal URL is https://immigration.niptei.com — NOT https://niptei.com.
-//  * Sender is NOT updates@niptei.com (unverified). The placeholder
-//    sender below is labelled "needs verified Resend domain"; the real
-//    contact address in every footer is nipteiapp@gmail.com.
+//  * Sender is updates@niptei.com via AWS SES (platform sender,
+//    src/lib/email.ts) — UNVERIFIED until the niptei.com domain
+//    identity is verified in SES and the DKIM records are added in
+//    IONOS. The placeholder sender below is labelled "needs verified
+//    SES domain"; the real contact address in every footer is
+//    nipteiapp@gmail.com.
 //  * NO A-Number appears in any template, ever.
 //  * {{caseNumber}} (USCIS receipt / NVC case number) appears ONLY in
 //    the at_uscis + nvc_processing templates — in the email body and
@@ -13,7 +16,7 @@
 //    belong in the portal link, not in SMS subjects. The route
 //    (src/app/api/notify-stage/route.ts) drops {{caseNumber}} for
 //    every other stage.
-//  * Twilio / Resend are NOT connected. No keys in this file.
+//  * Twilio / AWS SES are NOT connected. No keys in this file.
 //
 // AUTHORSHIP NOTE: no founder-supplied EN/ES/HT template text was
 // found anywhere in this repo (searched src/ + supabase/ + your_files
@@ -31,13 +34,13 @@ import type { LanguageCode } from "./i18n";
 export const PORTAL_URL = "https://immigration.niptei.com";
 
 // Placeholder sender — NOT verified. Do not change this to a real
-// sending address until the Resend domain is verified; until then
-// the route returns 501 and sends nothing.
+// sending address until the niptei.com domain is verified in AWS SES;
+// until then the route returns 501 / fails honestly and sends nothing.
 export const NOTIFICATION_SENDER = {
   name: "Immigration with NIPTEI",
-  email: "notifications@immigration.niptei.com",
+  email: "updates@niptei.com",
   verified: false,
-  note: "Needs verified Resend domain — do not send from this address until verified.",
+  note: "Needs verified AWS SES domain — do not send from this address until verified.",
 } as const;
 
 // Real contact address, printed in the footer of every template.
@@ -395,6 +398,10 @@ export type TemplateVars = {
   /** Name of the one missing document, for the missing-document nudge. */
   missingDocument?: string;
   portalUrl?: string;
+  /** Professional-entered status text (case-status update only). */
+  statusText?: string;
+  /** Labelled-manual receipt line, or "" (case-status update only). */
+  receiptLine?: string;
 };
 
 const PLACEHOLDER_KEYS = [
@@ -406,6 +413,11 @@ const PLACEHOLDER_KEYS = [
   "missingCount",
   "missingDocument",
   "portalUrl",
+  // Case-status update placeholders (src/lib/caseStatusSync.ts):
+  // the professional-entered status text and the (labelled manual)
+  // receipt line. Subjects never use these — see renderStatusUpdate.
+  "statusText",
+  "receiptLine",
 ] as const;
 
 /** Fill {{placeholders}} in a template string. Missing values render as "". */
@@ -437,5 +449,52 @@ export function renderNotification(
     emailSubject: renderTemplateText(tpl.emailSubject, fullVars),
     emailBody: renderTemplateText(tpl.emailBody, fullVars),
     smsText: renderTemplateText(tpl.smsText, fullVars),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Case-status update template — one template for the case-status sync
+// (src/lib/caseStatusSync.ts, POST /api/case-status). ENGLISH ONLY —
+// translation pending: no 7-language version exists yet, so the status
+// email is sent in English with this note in the professional-facing
+// draft. The subject is built from the form label ONLY — the
+// professional's free-text status never goes into a subject, so no
+// DOB, A-Number, SSN or passport number can leak into one.
+// {{statusText}} is the professional-entered plain-English update.
+// {{receiptLine}} is "" when there is no receipt number, otherwise the
+// manually-entered receipt line (labelled manual, never a live lookup).
+// ---------------------------------------------------------------------------
+export const CASE_STATUS_UPDATE_TEMPLATE = {
+  emailSubject: "Update on your {{service}} case — Immigration with NIPTEI",
+  emailBody:
+    "Hello {{name}},\n\nHere is an update on your {{service}} case:\n\n{{statusText}}\n\n{{receiptLine}}View your case: {{portalUrl}}\n\nThis update was entered by your preparer. It is not a live USCIS lookup — USCIS live status needs a Production key, which is not connected yet.\n\nImmigration with NIPTEI is a document-preparation service. We are not a law firm and we are not affiliated with USCIS. Only a licensed attorney or a DOJ-accredited representative can give legal advice.\n\nQuestions? Write to nipteiapp@gmail.com.\n\nImmigration with NIPTEI — https://immigration.niptei.com",
+} as const;
+
+export type StatusUpdateVars = TemplateVars & {
+  /** Professional-entered plain-English status text. */
+  statusText?: string;
+  /** Full receipt line (already labelled manual), or "" when none. */
+  receiptLine?: string;
+};
+
+/** Render the case-status update email. Subject never contains free text. */
+export function renderStatusUpdate(vars: StatusUpdateVars): {
+  emailSubject: string;
+  emailBody: string;
+} {
+  const fullVars: TemplateVars & { statusText?: string; receiptLine?: string } = {
+    portalUrl: PORTAL_URL,
+    receiptLine: "",
+    ...vars,
+  };
+  return {
+    emailSubject: renderTemplateText(
+      CASE_STATUS_UPDATE_TEMPLATE.emailSubject,
+      fullVars
+    ),
+    emailBody: renderTemplateText(
+      CASE_STATUS_UPDATE_TEMPLATE.emailBody,
+      fullVars
+    ),
   };
 }

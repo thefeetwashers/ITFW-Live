@@ -20,7 +20,7 @@
 //     only from document colours — and is labelled as such wherever shown.
 //
 // What is NOT live (labelled everywhere this engine is shown):
-//   Stripe, Twilio, Resend / AWS SES, Google Translate, live USCIS lookup
+//   Stripe, Twilio, AWS SES, Google Translate, live USCIS lookup
 //   (Production key NOT built — manual entry + Sandbox only), CEAC (manual
 //   only — NVC has no API), carrier APIs, video, calendar, E-Sign provider.
 //   No invented prices, people, numbers, or dates as real: every figure
@@ -782,7 +782,7 @@ export function missedPaymentMath(totalServiceFeeCents: number): {
 }
 
 /** Past-due nudge (48h, in the client's language, QUEUE ONLY).
- *  Twilio / Resend are NOT connected, so this never claims a send. */
+ *  Twilio / AWS SES are NOT connected, so this never claims a send. */
 export function pastDueNudgeText(
   invoiceNumber: string,
   amountCents: number,

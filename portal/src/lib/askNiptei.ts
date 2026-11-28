@@ -22,8 +22,10 @@
 //  * NEVER invents a fee, a processing time, a cutoff date, a case
 //    status, or a legal outcome. Unknown = "I do not know — check
 //    uscis.gov / ask your preparer / ask an attorney" with the link.
-//  * Every answer carries: "AI helper — educational information
-//    only, not legal advice".
+//  * Every answer carries: "Ask NIPTEI — educational information
+//    only, not legal advice, not USCIS". The chat is the platform's
+//    helper — it NEVER pretends to be USCIS, a government officer,
+//    or an attorney.
 //
 // AI STATUS — NOT LIVE in this build:
 //  * No AI provider is connected. Platform default is OpenRouter,
@@ -55,6 +57,31 @@ import {
   formatCents,
   govFeeNoteFor,
 } from "./storefront";
+import { getLockedPriceByKey } from "./stripePrices";
+import {
+  CONDUCT_GUIDE,
+  NO_GUARANTEE_NOTICE,
+  WHAT_TO_BRING,
+  interviewQuestionCounts,
+} from "./interviewPrep";
+import {
+  BUNDLE_TEMPLATES,
+  FAMILY_ADJUSTMENT_BUNDLE,
+} from "./bundles";
+import { findGlossaryTerm, GLOSSARY_DISCLAIMER } from "./glossary";
+import {
+  FEE_WAIVER_CHECKLIST,
+  FEE_WAIVER_HOW_TO_USE,
+  FEE_WAIVER_ONLY_USCIS_DECIDES,
+  FEE_WAIVER_PREP_PRICE_NOTE,
+  FEE_WAIVER_SOURCE,
+} from "./feeWaiverChecklist";
+import { unpricedForm } from "./quotedForms";
+import {
+  BUILT_IN_NEWS,
+  LIVE_NEWS_FEED_STATUS,
+  newsForChat,
+} from "./immigrationNews";
 import { LANGUAGES, type LanguageCode } from "./i18n";
 import type { AuditItem } from "./audit";
 import { computePacketReadiness } from "./audit";
@@ -64,7 +91,7 @@ export { LANGUAGES };
 export type { LanguageCode };
 
 export const COPILOT_DISCLAIMER =
-  "AI helper — educational information only, not legal advice";
+  "Ask NIPTEI — educational information only, not legal advice, not USCIS";
 
 export const SOURCES = {
   uscis: { label: "uscis.gov", url: "https://www.uscis.gov" },
@@ -106,6 +133,13 @@ export type CopilotIntent =
   | "timeline_gaps"
   | "packet_audit"
   | "filing_help"
+  | "interview"
+  | "bundles"
+  | "diy_fees"
+  | "fee_waiver"
+  | "glossary"
+  | "quoted_form"
+  | "news"
   | "general";
 
 export interface CopilotAnswer {
@@ -300,6 +334,8 @@ export interface AnswerCopilotOptions {
   /** Service the client ordered, when known (wires in the Dynamic
    *  Intake Engine / Smart Intake Calculator via templateIdForService). */
   serviceRequested?: Parameters<typeof templateIdForService>[0];
+  /** Form codes on the client's case, for case-aware news matching. */
+  caseForms?: string[];
 }
 
 export function answerCopilot(
@@ -336,10 +372,12 @@ export function answerCopilot(
       intent: "general",
       answer:
         "Ask me anything about your immigration forms — which form you need, " +
-        "what documents are needed, what a USCIS/NVC notice means, what a fee is, " +
-        "or what to do next. I answer from the platform's locked guides and " +
+        "what documents are needed, what to bring to your interview, what a USCIS/NVC notice means, what a fee is, " +
+        "what the DIY $25 / $99 covers, what a word means (glossary), what the fee-waiver checklist asks, " +
+        "what the Family Adjustment Bundle covers, which forms are quoted individually, or what immigration news is posted. " +
+        "I answer from the platform's locked guides and " +
         "uscis.gov / travel.state.gov / justice.gov/eoir only, and I never give " +
-        "legal advice.",
+        "legal advice. I am Ask NIPTEI, the platform's helper — not USCIS, not a government officer, not an attorney.",
       sources: [SOURCES.uscis, SOURCES.platformPrices],
       escalated: false,
       escalationReason: null,
@@ -347,7 +385,23 @@ export function answerCopilot(
   }
 
   // 1. Hard guardrail first: any legal-decision question escalates.
-  if (includesAny(q, ESCALATION_PATTERNS)) {
+  // Carve-out: a plain INFORMATION question about the fee-waiver
+  // checklist (Form I-912 — "what is a fee waiver", "fee waiver
+  // checklist") is answered with the checklist, not escalated. Any
+  // question that asks whether the asker QUALIFIES still escalates
+  // ("do I qualify for a fee waiver" is an eligibility decision).
+  const isFeeWaiverInfo =
+    (q.includes("i-912") || q.includes("fee waiver")) &&
+    !includesAny(q, [
+      "qualify",
+      "eligible",
+      "do i",
+      "am i",
+      "can i get",
+      "will i get",
+      "should i apply",
+    ]);
+  if (includesAny(q, ESCALATION_PATTERNS) && !isFeeWaiverInfo) {
     return {
       ...base,
       intent: "escalation_legal",
@@ -366,6 +420,148 @@ export function answerCopilot(
       intent: "unknown_time_status_outcome",
       answer: UNKNOWN_ANSWER,
       sources: [SOURCES.uscis, SOURCES.visaBulletin, SOURCES.travelState],
+      escalated: false,
+      escalationReason: null,
+    };
+  }
+
+  // 2b. Glossary — "what does RFE mean?" / "what is TPS?".
+  // Answered from the plain-language glossary (src/lib/glossary.ts),
+  // which is sourced from the codebase + the official site named on
+  // each entry. A definition is not legal advice.
+  if (
+    (q.includes("what does") ||
+      q.includes("what is") ||
+      q.includes("what do you mean") ||
+      q.includes("mean by") ||
+      q.includes("meaning of")) &&
+    // A question about a LETTER or NOTICE ("what does my RFE letter
+    // mean?") belongs to the RFE Decoder below, not the glossary.
+    !q.includes("letter") &&
+    !q.includes("notice")
+  ) {
+    const term = findGlossaryTerm(q);
+    if (term) {
+      return {
+        ...base,
+        intent: "glossary",
+        answer:
+          `${term.term}: ${term.definition}\n\n` +
+          `Source: ${term.sourceLabel} (${term.sourceUrl}). ` +
+          GLOSSARY_DISCLAIMER,
+        sources: [
+          { label: term.sourceLabel, url: term.sourceUrl },
+          SOURCES.platformPrices,
+        ],
+        escalated: false,
+        escalationReason: null,
+      };
+    }
+  }
+
+  // 2c. Quoted forms — I-526E / I-526 / I-829 / I-693 have NO locked
+  // price. Never invent one: the answer says "quoted individually"
+  // and points to the quote request in the service catalog.
+  {
+    const quotedCode = ["i-526e", "i-526", "i-829", "i-693"].find((c) =>
+      q.includes(c)
+    );
+    if (quotedCode) {
+      const form = unpricedForm(quotedCode.toUpperCase());
+      const is693 = quotedCode === "i-693";
+      return {
+        ...base,
+        intent: "quoted_form",
+        answer:
+          (form ? `${form.name}: ${form.pricingState}\n\n` : "") +
+          (is693
+            ? "Form I-693 is the medical exam. Booking is free — a USCIS-designated civil surgeon completes the form and seals it, and the doctor's fee ($250–$500) is paid to the doctor, not here. Do not open the sealed envelope; bring it sealed to your interview."
+            : "This form is quoted individually. No price is shown here and none has been invented — a professional quotes it for your situation after you request a quote in the service catalog (Master Form & Service Bundle Catalog — “Quoted individually” section).") +
+          "\n\nConfirm the current USCIS fee for this form at uscis.gov/fees before you pay anything.",
+        sources: [SOURCES.uscisFees, SOURCES.platformPrices],
+        escalated: false,
+        escalationReason: null,
+      };
+    }
+  }
+
+  // 2d. Bundles — the locked Family Adjustment Bundle + the bundle
+  // catalog (src/lib/bundles.ts). Locked prices only; a bundle with
+  // no locked combined fee is TO BE CONFIRMED, never invented.
+  if (q.includes("bundle")) {
+    const b = FAMILY_ADJUSTMENT_BUNDLE;
+    const lines = BUNDLE_TEMPLATES.map((t) => {
+      const fee = t.serviceFee
+        ? "basic" in t.serviceFee
+          ? `Basic $${t.serviceFee.basic} / Standard $${t.serviceFee.standard} / Premium $${t.serviceFee.premium} (locked)`
+          : `$${t.serviceFee.flat} flat (locked)`
+        : "TO BE CONFIRMED — no locked combined fee";
+      return `• ${t.formCode} — ${t.name}: ${fee}. ${t.uscisFeeNote}`;
+    }).join("\n");
+    return {
+      ...base,
+      intent: "bundles",
+      answer:
+        `${b.name} (locked): Basic $${b.price.basic} / Standard $${b.price.standard} / Premium $${b.price.premium}. ` +
+        `Forms: ${b.forms.join(", ")}. I-130A is included free with I-130.\n\n` +
+        `Other bundles in the catalog:\n${lines}\n\n` +
+        "Government (USCIS) fees are always separate from the preparation fee — confirm the current fee at uscis.gov/fees before you pay.",
+      sources: [SOURCES.uscisFees, SOURCES.platformPrices],
+      escalated: false,
+      escalationReason: null,
+    };
+  }
+
+  // 2e. DIY fees — DIY $25/form or DIY Bundle $99 (locked Stripe
+  // Prices, src/lib/stripePrices.ts). Answering the questions is
+  // free; print / save / email unlock only after the DIY payment is
+  // confirmed in the database. USCIS fees are separate.
+  if (
+    q.includes("diy") ||
+    q.includes("do it myself") ||
+    q.includes("file it myself") ||
+    q.includes("print my form") ||
+    q.includes("print the form")
+  ) {
+    const single = getLockedPriceByKey("diy_form");
+    const bundle = getLockedPriceByKey("diy_bundle");
+    return {
+      ...base,
+      intent: "diy_fees",
+      answer:
+        "Doing it yourself (DIY) on this platform: answering the guided questions is free. " +
+        `Print, save and email of your completed application unlock after your DIY payment is confirmed in our records — ` +
+        `${single ? `DIY $${single.amountCents / 100} for this form (locked Price ${single.priceId})` : "DIY $25 for this form (locked)"} ` +
+        `or ${bundle ? `DIY Bundle $${bundle.amountCents / 100} (locked Price ${bundle.priceId})` : "DIY Bundle $99 (locked)"}, which covers every DIY form for your case. ` +
+        "If you already paid, the DIY page says “Already paid” and does not charge you again — access unlocks from the payment record, never from a button. " +
+        "USCIS government fees are separate and are never part of the DIY payment — confirm the current USCIS fee at uscis.gov/fees before you pay. " +
+        "You review and sign before anything is submitted; the system never files for you.",
+      sources: [SOURCES.uscisFees, SOURCES.platformPrices],
+      escalated: false,
+      escalationReason: null,
+    };
+  }
+
+  // 2f. Fee-waiver checklist — Form I-912. A CHECKLIST of the
+  // questions USCIS asks, not a decision: only USCIS decides.
+  if (q.includes("i-912") || q.includes("fee waiver")) {
+    return {
+      ...base,
+      intent: "fee_waiver",
+      answer:
+        "Form I-912 is the Request for Fee Waiver. This is a checklist of the questions USCIS asks — it is NOT a decision about you. " +
+        FEE_WAIVER_ONLY_USCIS_DECIDES +
+        "\n\n" +
+        FEE_WAIVER_CHECKLIST.map(
+          (item, i) => `${i + 1}. ${item.question}\n   What to show: ${item.whatToShow}`
+        ).join("\n\n") +
+        "\n\nHow to use it:\n" +
+        FEE_WAIVER_HOW_TO_USE.map((s) => `• ${s}`).join("\n") +
+        `\n\n${FEE_WAIVER_PREP_PRICE_NOTE}\n\nSource: ${FEE_WAIVER_SOURCE.label} (${FEE_WAIVER_SOURCE.url}).`,
+      sources: [
+        { label: FEE_WAIVER_SOURCE.label, url: FEE_WAIVER_SOURCE.url },
+        SOURCES.platformPrices,
+      ],
       escalated: false,
       escalationReason: null,
     };
@@ -400,6 +596,48 @@ export function answerCopilot(
       escalationReason: null,
       checklistTemplateId: template?.id ?? null,
       checklistTemplate: template,
+    };
+  }
+
+  // 3b. Interview — "what do I bring to my interview?" Answered
+  // from src/lib/interviewPrep.ts: the what-to-bring lists (N-400 /
+  // I-485 / consular), the conduct guide, and the civics bank (a
+  // SAMPLE of 25 of the official 100 — study all 100 on uscis.gov).
+  // Never a guarantee: only USCIS / the consulate decides.
+  if (
+    q.includes("interview") ||
+    q.includes("civics") ||
+    q.includes("mock interview") ||
+    q.includes("what to bring") ||
+    q.includes("what do i bring")
+  ) {
+    const counts = interviewQuestionCounts();
+    const bring = WHAT_TO_BRING.map((g) => {
+      const items = g.items
+        .map((i) => `• ${i.item} — ${i.why}`)
+        .join("\n");
+      return `${g.interviewType} — what to bring:\n${g.checkFirst ? `${g.checkFirst}\n` : ""}${items}`;
+    }).join("\n\n");
+    const conduct = CONDUCT_GUIDE.points
+      .slice(0, 5)
+      .map((p) => `• ${p}`)
+      .join("\n");
+    return {
+      ...base,
+      intent: "interview",
+      answer:
+        `${bring}\n\n` +
+        `How to conduct yourself at the interview (first points):\n${conduct}\n` +
+        `Full conduct guide, what the officer looks for, and common delay / denial reasons are in Interview Prep on this platform.\n\n` +
+        `Civics test: this platform holds a sample of ${counts.officialCivics} of the official 100 USCIS civics questions — study all 100 on uscis.gov, not only this sample. Practice questions here are written by the platform from the topics USCIS lists; they are NOT official USCIS questions, and an officer will not necessarily ask these exact questions.\n\n` +
+        `${NO_GUARANTEE_NOTICE}`,
+      sources: [
+        { label: "USCIS — The Naturalization Interview and Test", url: "https://www.uscis.gov/citizenship/learn-about-citizenship/the-naturalization-interview-and-test" },
+        { label: "USCIS — Study for the Test (official 100 civics questions)", url: "https://www.uscis.gov/citizenship/find-study-materials-and-resources/study-for-the-test" },
+        { label: "USCIS — Adjustment of Status", url: "https://www.uscis.gov/green-card/green-card-processes-and-procedures/adjustment-of-status" },
+      ],
+      escalated: false,
+      escalationReason: null,
     };
   }
 
@@ -543,6 +781,46 @@ export function answerCopilot(
     };
   }
 
+  // 8b. News — immigration news and updates inside the chat.
+  // From the built-in posts only (src/lib/immigrationNews.ts) —
+  // no live feed is connected, and the answer says so. When the
+  // client's case forms are supplied, matching items are flagged
+  // "This may affect your case".
+  if (
+    q.includes("news") ||
+    q.includes("what changed") ||
+    q.includes("has anything changed") ||
+    q.includes("immigration update") ||
+    q.includes("any updates")
+  ) {
+    const news = newsForChat(opts.caseForms ?? []);
+    const lines = news.flags
+      .map(
+        (f) =>
+          `• ${f.item.title} (${f.item.date}) — ${f.item.summary} Source: ${f.item.sourceLabel} (${f.item.sourceUrl})` +
+          (f.affectsYourCase ? `\n  ${f.flagText}` : "")
+      )
+      .join("\n\n");
+    return {
+      ...base,
+      intent: "news",
+      answer:
+        (BUILT_IN_NEWS.length > 0
+          ? `Immigration news on this platform:\n\n${lines}\n\n`
+          : "There are no built-in news posts on this platform right now.\n\n") +
+        LIVE_NEWS_FEED_STATUS.note +
+        (news.affectingYourCase.length > 0
+          ? `\n\n${news.affectingYourCase.length} item(s) above may affect your case — read the flag on each one. A flag means “read this”, not “your case will change”. If a change worries you, ask your preparer or a licensed attorney / DOJ-accredited representative.`
+          : ""),
+      sources: [
+        { label: "travel.state.gov — Visa Bulletin", url: "https://travel.state.gov/content/travel/en/legal/visa-law0/visa-bulletin.html" },
+        SOURCES.uscis,
+      ],
+      escalated: false,
+      escalationReason: null,
+    };
+  }
+
   // 9. Documents / checklist — wired to the Dynamic Intake Engine +
   // Smart Intake Calculator via templateIdForService / form checklists.
   if (
@@ -556,12 +834,16 @@ export function answerCopilot(
       template = id ? getTemplate(id) : null;
     }
     if (template) {
+      const fullList = template.checklist
+        .map((i) => `• ${i.title}${i.condition ? ` (${i.condition})` : ""}`)
+        .join("\n");
       return {
         ...base,
         intent: code ? "documents_checklist" : "form_finder",
         answer:
           `You need ${template.formsIncluded.join(" + ")} — here is the checklist:\n\n` +
           checklistSummary(template) +
+          `\n\nFull document list (${template.checklist.length} items):\n${fullList}` +
           "\n\nNext step: gather the items above, then open the Smart Forms / questionnaire to complete them. " +
           "If you are not sure this is the right form for your situation, ask a human — only a licensed attorney or DOJ-accredited representative decides which form fits your case.",
         sources: [SOURCES.uscisForms, SOURCES.platformPrices],
@@ -608,8 +890,10 @@ export function answerCopilot(
     ...base,
     intent: "general",
     answer:
-      "I can help with: which form you need, what documents are needed, what a USCIS/NVC notice means " +
-      "(RFE Decoder), how to complete a field on a form, what the fees are (locked prices only), " +
+      "I can help with: which form you need, what documents are needed, what to bring to your interview, " +
+      "what a USCIS/NVC notice means (RFE Decoder), how to complete a field on a form, what the fees are (locked prices only), " +
+      "the DIY $25 / $99 fee, the Family Adjustment Bundle, which forms are quoted individually (I-526E / I-526 / I-829 / I-693), " +
+      "what a word means (glossary), the Form I-912 fee-waiver checklist, immigration news posted here, " +
       "your 5-year timeline gaps, and your packet audit score. " +
       "I do not know the answer to this question from the platform's locked guides — " +
       "I do not know — check uscis.gov (https://www.uscis.gov), ask your preparer, or ask an attorney. " +

@@ -55,8 +55,8 @@ export const BYO_PROVIDERS: ProviderDef[] = [
     ],
   },
   {
-    key: "aws_ses", name: "AWS SES (email, alternative)", whatItDoes: "Sends email through your own AWS SES account — the alternative to Resend.",
-    envNames: ["AWS_SES_ACCESS_KEY_ID", "AWS_SES_SECRET_ACCESS_KEY", "AWS_SES_REGION"], testTarget: "own_email", notConnectedLabel: "NOT CONNECTED — email will return “not configured”.",
+    key: "aws_ses", name: "AWS SES (email)", whatItDoes: "Sends email through your own AWS SES account. (The platform itself also sends through AWS SES — see src/lib/email.ts.)",
+    envNames: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SES_REGION"], testTarget: "own_email", notConnectedLabel: "NOT CONNECTED — email will return “not configured”.",
     connectFields: [
       { id: "access_key_id", label: "AWS access key ID", secret: true, placeholder: "AKIA…" },
       { id: "secret_access_key", label: "AWS secret access key", secret: true, placeholder: "••••" },

@@ -45,7 +45,7 @@ export const EXAMPLE_AGENCY_NUMBERS: AgencyNumber[] = [
     id: "agency-2",
     agency: "NVC",
     formOrStage: "Consular — I-130",
-    caseNumber: "CRS2026600002 (example)",
+    caseNumber: "CRS2026144002 (example)",
     nvcInvoiceId: "42117188 (example)",
     agencyStatus: "What NVC Says Is Missing: Police Certificate & 2025 IRS Tax Transcript (example)",
     missingFromAgency: "Police Certificate & 2025 IRS Tax Transcript",
